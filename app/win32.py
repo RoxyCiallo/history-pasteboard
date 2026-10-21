@@ -1,4 +1,4 @@
-"""Win32 API 封装：剪贴板读写、序列号、敏感标记检测、全局热键、高 DPI。
+"""Win32 API 封装：剪贴板读写、序列号、敏感标记检测、全局热键、高 DPI、单实例。
 
 按 `docs/02` §7 的约定，**所有 ctypes 调用集中在本模块**，其他模块不得直接 import ctypes。
 本模块只做系统调用，不含业务判断；剪贴板失败一律抛 :class:`ClipboardError` 或返回 ``None``。
@@ -32,6 +32,20 @@ WM_QUIT = 0x0012
 HOTKEY_ID = 1
 HOTKEY_MODIFIERS = MOD_CONTROL | MOD_SHIFT
 HOTKEY_VK = 0x56
+
+#: 热键候选表：(修饰键, 虚拟键, 展示名)。主键被占用时依次回退（docs/02 §7）。
+HOTKEY_CANDIDATES = (
+    (MOD_CONTROL | MOD_SHIFT, 0x56, "Ctrl+Shift+V"),
+    (MOD_CONTROL | MOD_ALT, 0x56, "Ctrl+Alt+V"),
+    (MOD_CONTROL | MOD_SHIFT, 0x48, "Ctrl+Shift+H"),
+)
+
+#: 单实例与「唤起已有实例」用到的常量（ADR-010）。
+ERROR_ALREADY_EXISTS = 183
+EVENT_MODIFY_STATE = 0x0002
+WAIT_OBJECT_0 = 0x00000000
+MUTEX_NAME = "Local\\PasteBoard.SingleInstance"
+ACTIVATE_EVENT_NAME = "Local\\PasteBoard.Activate"
 
 _LOGGER = logging.getLogger("pasteboard.win32")
 
@@ -110,6 +124,25 @@ if _user32 is not None:  # pragma: no cover - 依赖 Windows
     _user32.PostThreadMessageW.restype = wintypes.BOOL
     _kernel32.GetCurrentThreadId.argtypes = []
     _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+    # 单实例与唤起（ADR-010）
+    _kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    _kernel32.CreateMutexW.restype = wintypes.HANDLE
+    _kernel32.CreateEventW.argtypes = [
+        wintypes.LPVOID,
+        wintypes.BOOL,
+        wintypes.BOOL,
+        wintypes.LPCWSTR,
+    ]
+    _kernel32.CreateEventW.restype = wintypes.HANDLE
+    _kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    _kernel32.OpenEventW.restype = wintypes.HANDLE
+    _kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+    _kernel32.SetEvent.restype = wintypes.BOOL
+    _kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    _kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
 
 
 def available() -> bool:
@@ -247,6 +280,104 @@ def set_dpi_awareness() -> bool:
         return False
 
 
+# ---- 单实例与唤起 ------------------------------------------------
+
+class SingleInstance:
+    """用命名互斥体做单实例判定，用命名事件通知已有实例「把窗口唤出来」。
+
+    用法（`app/main.py`）::
+
+        instance = SingleInstance()
+        if not instance.acquire():
+            return 0          # 已有实例在跑，且已通知它唤出窗口
+        ...
+        instance.close()
+
+    名字带 ``Local\\`` 前缀，只在当前登录会话内生效，不会和其他 Windows 用户互相干扰。
+    """
+
+    def __init__(
+        self,
+        mutex_name: str = MUTEX_NAME,
+        event_name: str = ACTIVATE_EVENT_NAME,
+    ) -> None:
+        self._mutex_name = mutex_name
+        self._event_name = event_name
+        self._mutex = None
+        self._event = None
+
+    def acquire(self) -> bool:
+        """尝试成为唯一实例。
+
+        - 首个实例：返回 ``True``，并创建唤起事件；
+        - 已有实例：返回 ``False``，同时 ``SetEvent`` 让已有实例把窗口唤到前台。
+        """
+        if not available():  # pragma: no cover - 非 Windows 不阻塞启动
+            return True
+        mutex = _kernel32.CreateMutexW(None, False, self._mutex_name)
+        last_error = ctypes.get_last_error()
+        if last_error == ERROR_ALREADY_EXISTS:
+            if mutex:
+                _kernel32.CloseHandle(mutex)
+            self._notify_existing()
+            return False
+        self._mutex = mutex
+        self._event = _kernel32.CreateEventW(None, False, False, self._event_name)
+        if not self._event:  # pragma: no cover - 极端环境
+            _LOGGER.warning("创建唤起事件失败（Win32 错误码 %s）", ctypes.get_last_error())
+        return True
+
+    def wait(self, timeout_ms: int = 250) -> bool:
+        """等待唤起事件，收到返回 ``True``；超时返回 ``False``。"""
+        if not self._event:
+            return False
+        return _kernel32.WaitForSingleObject(self._event, timeout_ms) == WAIT_OBJECT_0
+
+    def close(self) -> None:
+        """释放事件与互斥体句柄；进程退出时系统也会自动回收。"""
+        for handle in (self._event, self._mutex):
+            if handle:
+                _kernel32.CloseHandle(handle)
+        self._event = None
+        self._mutex = None
+
+    def _notify_existing(self) -> None:
+        event = _kernel32.OpenEventW(EVENT_MODIFY_STATE, False, self._event_name)
+        if not event:
+            # 对方刚退出、事件已销毁时会出现，忽略即可。
+            _LOGGER.warning("找不到已有实例的唤起事件，无法唤出窗口")
+            return
+        try:
+            _kernel32.SetEvent(event)
+        finally:
+            _kernel32.CloseHandle(event)
+
+
+class ActivateWatcher(threading.Thread):
+    """后台等待唤起事件；收到后往队列投递 ``("activate", None)``。
+
+    主线程收到事件后调用 ``MainWindow.show()``。用轮询超时的方式等待，
+    以便 ``stop()`` 能在一轮内生效，不依赖销毁事件对象。
+    """
+
+    def __init__(self, instance: SingleInstance, event_queue=None, poll_ms: int = 250) -> None:
+        super().__init__(name="activate-watcher", daemon=True)
+        self._instance = instance
+        self._queue = event_queue
+        self._poll_ms = poll_ms
+        self._stop_event = threading.Event()
+
+    def run(self) -> None:
+        while not self._stop_event.is_set():
+            if self._instance.wait(self._poll_ms) and self._queue is not None:
+                self._queue.put(("activate", None))
+
+    def stop(self, timeout: float = 1.0) -> None:
+        self._stop_event.set()
+        if self.is_alive():
+            self.join(timeout)
+
+
 # ---- 全局热键 ------------------------------------------------------
 
 
@@ -255,20 +386,19 @@ class HotkeyThread(threading.Thread):
 
     Win32 的 ``RegisterHotKey(None, ...)`` 要求调用线程自己跑消息循环，
     因此热键必须有自己的线程，不能挂在 Tk 主线程上。
-    注册失败（被占用）时把 ``("hotkey_failed", 错误码)`` 放进队列并结束线程。
+    按 ``candidates`` 依次尝试注册，全部被占用时把 ``("hotkey_failed", 错误码)``
+    放进队列并结束线程；注册成功则投递 ``("hotkey_registered", 展示名)``。
     """
 
     def __init__(
         self,
         event_queue=None,
-        modifiers: int = HOTKEY_MODIFIERS,
-        key: int = HOTKEY_VK,
+        candidates: tuple[tuple[int, int, str], ...] = HOTKEY_CANDIDATES,
         hotkey_id: int = HOTKEY_ID,
     ) -> None:
         super().__init__(name="hotkey", daemon=True)
         self._queue = event_queue
-        self._modifiers = modifiers
-        self._key = key
+        self._candidates = candidates
         self._hotkey_id = hotkey_id
         self._thread_id = 0
 
@@ -277,12 +407,12 @@ class HotkeyThread(threading.Thread):
             self._emit("hotkey_failed", "当前系统不支持全局热键")
             return
         self._thread_id = int(_kernel32.GetCurrentThreadId())
-        if not _user32.RegisterHotKey(None, self._hotkey_id, self._modifiers, self._key):
-            error = ctypes.get_last_error()
-            _LOGGER.warning("全局热键注册失败（Win32 错误码 %s），可能被其他程序占用", error)
-            self._emit("hotkey_failed", error)
+        label = self._register()
+        if label is None:
+            self._emit("hotkey_failed", ctypes.get_last_error())
             return
-        _LOGGER.info("全局热键已注册")
+        _LOGGER.info("全局热键已注册：%s", label)
+        self._emit("hotkey_registered", label)
         message = wintypes.MSG()
         try:
             while True:
@@ -294,6 +424,18 @@ class HotkeyThread(threading.Thread):
         finally:
             _user32.UnregisterHotKey(None, self._hotkey_id)
             _LOGGER.info("全局热键已注销")
+
+    def _register(self) -> str | None:
+        """依次尝试候选热键，返回成功的展示名；全失败返回 ``None``。"""
+        for modifiers, key, label in self._candidates:
+            if _user32.RegisterHotKey(None, self._hotkey_id, modifiers, key):
+                return label
+            _LOGGER.warning(
+                "全局热键 %s 注册失败（Win32 错误码 %s），可能被其他程序占用",
+                label,
+                ctypes.get_last_error(),
+            )
+        return None
 
     def stop(self, timeout: float = 1.0) -> None:
         """向热键线程投递 WM_QUIT，等它退出消息循环。"""

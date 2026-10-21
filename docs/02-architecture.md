@@ -29,10 +29,11 @@ app/
    ├─ theme.py      设计令牌（唯一色值来源）
    ├─ main_window.py 主窗口布局、搜索、列表容器、滚动、状态刷新
    ├─ card.py       单卡片绘制与命中区域
-   └─ dialogs.py    密码、设置、确认、提示、关于
+   └─ dialogs.py    设置面板（后续补密码对话框）
 ```
 
-> 已落地：`main.py`、`theme.py`、`main_window.py`（M3）；`card.py`、`dialogs.py`、`security.py` 待后续里程碑。
+> 已落地：`main.py`、`theme.py`、`main_window.py`（M3）、`card.py`（M4）、`dialogs.py`（M5 设置面板）；
+> `security.py` 与密码对话框待 M6。
 
 ### 模块职责与依赖
 
@@ -51,23 +52,26 @@ app/
 ```
 主线程 (tkinter mainloop)
  ├─ UI 事件、after() 定时器
- ├─ queue.get() 消费：新增记录事件、热键事件、清理完成事件
+ ├─ queue.get() 消费：新增记录、热键、唤出请求、热键注册结果、清理完成事件
  └─ 不与任何线程共享 tkinter 对象
 
 监听线程 (clipboard.ListenerThread, daemon)
  └─ 每 500ms 轮询 GetClipboardSequenceNumber → 变化则读取 → db.upsert → queue.put(("new", id))
 
 热键线程 (hotkey, daemon)
- └─ RegisterHotKey + GetMessage 循环 → WM_HOTKEY → queue.put(("hotkey", None))
+ └─ 依次尝试候选热键注册 → GetMessage 循环 → WM_HOTKEY → queue.put(("hotkey", None))
 
-清理定时器 (主线程 after(600_000) = 10 分钟)
- └─ db.purge_expired() → 通知 UI 刷新
+唤起等待线程 (win32.ActivateWatcher, daemon，M5)
+ └─ WaitForSingleObject(命名事件, 250ms) → 收到 → queue.put(("activate", None))
+
+清理定时器 (主线程：启动后 2 秒一次，之后 after(600_000) = 10 分钟)
+ └─ db.purge_expired() → 删图片文件 → 通知 UI 刷新 → 写 last_purge_at
 ```
 
 规则：
-1. **任何线程都不得直接调用 tkinter**；跨线程只通过 `queue.Queue`，主线程用 `after(120, poll_queue)` 消费。
+1. **任何线程都不得直接调用 tkinter**；跨线程只通过 `queue.Queue`，主线程用 `after(200, poll_queue)` 消费。
 2. `db.py` 内部单个连接 + `threading.RLock`，监听线程与 UI 线程可并发调用。
-3. 退出顺序：置停止标志 → join 监听线程(≤2s) → `UnregisterHotKey` + `PostThreadMessage(WM_QUIT)` → 关连接 → `destroy()`。
+3. 退出顺序：置停止标志 → join 监听线程(≤2s) → 热键 `UnregisterHotKey` + `PostThreadMessage(WM_QUIT)` → 唤起线程 stop → 关连接 → 关互斥体/事件句柄 → `destroy()`。
 
 ## 4. 数据流
 
@@ -173,9 +177,9 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 | `RegisterClipboardFormatW` | 检测 `ExcludeClipboardContentFromMonitorProcessing` 等标记 | 存在即视为私密 | ✅ |
 | `EmptyClipboard/SetClipboardData` + `GlobalAlloc/GlobalLock/GlobalUnlock` | 写文本（`CF_UNICODETEXT`）、写图片（`CF_DIB`） | `GMEM_MOVEABLE`；CF_DIB = BMP 去掉 14 字节文件头 | ✅ |
 | `GetClipboardData(CF_HDROP)` 等图片文件列表 | 复制「图片文件」时识别为图片 | 由 Pillow `ImageGrab.grabclipboard()` 处理 | ✅ |
-| `RegisterHotKey/UnregisterHotKey` | `Ctrl+Shift+V` | 独立线程 + `GetMessage` 循环；`PostThreadMessage(WM_QUIT)` 退出 | ✅（M3 提前落地，M5 只做失败备选键） |
-| `CreateMutexW` | 单实例 | `Global\PasteBoard.SingleInstance` | ⏳ M5 |
-| `RegisterWindowMessageW` + `PostMessage(HWND_BROADCAST)` | 唤醒已有实例 | 自定消息 ID | ⏳ M5 |
+| `RegisterHotKey/UnregisterHotKey` | 全局热键 | 候选：`Ctrl+Shift+V` → `Ctrl+Alt+V` → `Ctrl+Shift+H`，独立线程 + `GetMessage` 循环；`PostThreadMessage(WM_QUIT)` 退出 | ✅（M3 主键，M5 补备选键） |
+| `CreateMutexW` | 单实例 | `Local\PasteBoard.SingleInstance`，见 ADR-010 | ✅（M5） |
+| `CreateEventW/OpenEventW/SetEvent` + `WaitForSingleObject` | 唤起已有实例 | 命名事件 `Local\PasteBoard.Activate` + 后台等待线程（ADR-010，替代最初的窗口广播方案） | ✅（M5） |
 | `SetForegroundWindow/ShowWindow` | 唤出置前 | 目前用 tkinter `deiconify + lift + topmost` 实现 | ✅（M3，tkinter 方案） |
 | `SetProcessDpiAwareness` (`shcore`) | 高清缩放 | 失败回退 `user32.SetProcessDPIAware` | ✅（M3） |
 

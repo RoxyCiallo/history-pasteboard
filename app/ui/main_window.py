@@ -19,7 +19,7 @@ from PIL import Image, ImageTk
 
 import storage
 import win32
-from ui import card, theme
+from ui import card, dialogs, theme
 
 _LOGGER = logging.getLogger("pasteboard.ui.main_window")
 
@@ -28,6 +28,12 @@ POLL_INTERVAL_MS = 200
 REFRESH_DEBOUNCE_MS = 80
 SEARCH_DEBOUNCE_MS = 300
 RESIZE_DEBOUNCE_MS = 120
+#: 保留期清理：启动后 2 秒跑一次，之后每 10 分钟一次（docs/02 §7）。
+PURGE_INTERVAL_MS = 600_000
+PURGE_START_DELAY_MS = 2_000
+#: 状态栏临时提示的显示时长。
+STATUS_FLASH_MS = 6_000
+DEFAULT_HOTKEY_LABEL = "Ctrl+Shift+V"
 
 
 def format_time(iso_text: str, now: datetime | None = None) -> str:
@@ -82,6 +88,12 @@ class MainWindow(tk.Tk):
         self._has_more = False
         self._loading_more = False
         self._thumb_cache: dict[str, ImageTk.PhotoImage] = {}
+        self._purge_job = None
+        self._status_job = None
+        self._base_status = "共 0 条"
+        self._status_flash = ""
+        self._hotkey_label = DEFAULT_HOTKEY_LABEL
+        self._settings_dialog: "dialogs.SettingsDialog | None" = None
 
         self._apply_scaling()
         self._fonts = theme.Fonts(self)
@@ -99,6 +111,7 @@ class MainWindow(tk.Tk):
         self._bind_events()
 
         self.refresh()
+        self._purge_job = self.after(PURGE_START_DELAY_MS, self._purge_expired)
         if self._queue is not None:
             self.after(POLL_INTERVAL_MS, self._poll_events)
 
@@ -188,7 +201,7 @@ class MainWindow(tk.Tk):
             side="right", padx=(0, theme.PAD_WINDOW_X)
         )
         self._flat_button(header, "—", self.iconify, width=3).pack(side="right")
-        self._flat_button(header, "设置", self._show_settings_placeholder).pack(
+        self._flat_button(header, "设置", self._show_settings).pack(
             side="right", padx=(0, 10)
         )
 
@@ -226,6 +239,38 @@ class MainWindow(tk.Tk):
         self._flat_button(status, "彻底退出", self._confirm_quit).pack(
             side="right", padx=(0, theme.PAD_WINDOW_X)
         )
+
+    # ---- 状态栏 -------------------------------------------------------
+
+    def _set_base_status(self, text: str) -> None:
+        """设置状态栏的常驻文本（条数、保留天数）。"""
+        self._base_status = text
+        self._render_status()
+
+    def _flash_status(self, text: str, timeout_ms: int = STATUS_FLASH_MS) -> None:
+        """临时提示（复制失败、热键回退等），到时自动恢复常驻文本。"""
+        self._status_flash = text
+        self._render_status()
+        if self._status_job is not None:
+            try:
+                self.after_cancel(self._status_job)
+            except tk.TclError:
+                pass
+        self._status_job = self.after(timeout_ms, self._clear_flash)
+
+    def _clear_flash(self) -> None:
+        self._status_job = None
+        self._status_flash = ""
+        self._render_status()
+
+    def _render_status(self) -> None:
+        if self._closing:
+            return
+        text = self._status_flash or self._base_status
+        try:
+            self.status_label.configure(text=text)
+        except tk.TclError:
+            pass
 
     def _build_list_area(self) -> None:
         body = tk.Frame(self, bg=theme.BG_ROOT)
@@ -309,9 +354,7 @@ class MainWindow(tk.Tk):
         self._render(items)
         self._has_more = len(items) >= theme.LIST_PAGE
         total = self._database.count(keyword)
-        self.status_label.configure(
-            text=f"共 {total} 条 · 保留 {self._retention_days()} 天"
-        )
+        self._set_base_status(f"共 {total} 条 · 保留 {self._retention_days()} 天")
 
     def _retention_days(self) -> int:
         if self._config is None:
@@ -320,6 +363,37 @@ class MainWindow(tk.Tk):
             return int(self._config.retention_days)
         except Exception:
             return 3
+
+    def _purge_expired(self) -> None:
+        """按保留期清理过期记录（置顶除外）：启动后一次 + 每 10 分钟一次。"""
+        self._purge_job = None
+        if self._closing or self._database is None:
+            return
+        days = self._retention_days()
+        try:
+            removed = self._database.purge_expired(days)
+        except Exception:
+            _LOGGER.exception("保留期清理失败")
+            removed = []
+        if removed:
+            paths = []
+            for row in removed:
+                paths.append(row.get("image_path"))
+                paths.append(row.get("thumb_path"))
+                thumb = row.get("thumb_path")
+                if thumb:
+                    self._thumb_cache.pop(thumb, None)
+            storage.delete_files(self._data_dir, paths)
+            _LOGGER.info("保留期清理：删除 %s 条过期记录（保留 %s 天）", len(removed), days)
+            self._schedule_refresh()
+        if self._config is not None:
+            try:
+                self._config.set(
+                    "last_purge_at", datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                )
+            except Exception:
+                _LOGGER.exception("写入 last_purge_at 失败")
+        self._purge_job = self.after(PURGE_INTERVAL_MS, self._purge_expired)
 
     def _schedule_refresh(self) -> None:
         """把短时间内的多次刷新合并成一次，避免连续复制时列表闪烁。"""
@@ -421,7 +495,7 @@ class MainWindow(tk.Tk):
                 except (OSError, ValueError):
                     _LOGGER.exception("读取图片失败，id=%s", item.get("id"))
         if not ok:
-            self.status_label.configure(text="复制失败：剪贴板被占用，请稍后重试")
+            self._flash_status("复制失败：剪贴板被占用，请稍后重试")
             return
         _LOGGER.info("已复制回剪贴板，id=%s", item.get("id"))
         # 复制后的隐藏不弹首次提示，用户正在连用，不需要教学文案。
@@ -518,13 +592,25 @@ class MainWindow(tk.Tk):
             return
         try:
             while True:
-                kind, _payload = self._queue.get_nowait()
+                kind, payload = self._queue.get_nowait()
                 if kind == "new":
                     self._schedule_refresh()
                 elif kind == "hotkey":
                     self.show()
+                elif kind == "activate":
+                    self.show()
+                elif kind == "hotkey_registered":
+                    self._hotkey_label = str(payload or DEFAULT_HOTKEY_LABEL)
+                    if self._hotkey_label != DEFAULT_HOTKEY_LABEL:
+                        self._flash_status(
+                            f"{DEFAULT_HOTKEY_LABEL} 被占用，已改用 {self._hotkey_label}",
+                            timeout_ms=10_000,
+                        )
                 elif kind == "hotkey_failed":
-                    self.status_label.configure(text="全局热键注册失败，可能被其他程序占用")
+                    self._flash_status(
+                        "全局热键注册失败，可能被其他程序占用，请用设置面板检查",
+                        timeout_ms=10_000,
+                    )
         except queue.Empty:
             pass
         self.after(POLL_INTERVAL_MS, self._poll_events)
@@ -560,8 +646,43 @@ class MainWindow(tk.Tk):
         self.focus_force()
         self.refresh()
 
-    def _show_settings_placeholder(self) -> None:
-        messagebox.showinfo("设置", "设置面板将在后续版本提供。", parent=self)
+    def _show_settings(self) -> None:
+        """打开设置面板；已经打开时只把它提到前面，不重复创建。"""
+        existing = self._settings_dialog
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_set()
+                    return
+            except tk.TclError:
+                pass
+        if self._config is None:
+            messagebox.showinfo("设置", "当前没有可用的配置存储。", parent=self)
+            return
+        dialog = dialogs.SettingsDialog(
+            self,
+            self._fonts,
+            self._config,
+            self._data_dir,
+            on_clear=self._clear_history,
+            on_saved=self.refresh,
+            hotkey_label=self._hotkey_label,
+        )
+        self._settings_dialog = dialog
+
+    def _clear_history(self) -> int:
+        """清空全部历史：删记录、删图片文件、清缩略图缓存，返回删除条数。"""
+        records = self._database.clear_all()
+        paths: list[str | None] = []
+        for record in records:
+            paths.append(record.get("image_path"))
+            paths.append(record.get("thumb_path"))
+        storage.delete_files(self._data_dir, paths)
+        self._thumb_cache.clear()
+        self.refresh()
+        _LOGGER.info("已清空全部历史，共 %s 条", len(records))
+        return len(records)
 
     def _confirm_quit(self) -> None:
         if messagebox.askyesno(
@@ -576,6 +697,12 @@ class MainWindow(tk.Tk):
         if self._closing:
             return
         self._closing = True
+        for job in (self._purge_job, self._status_job, self._search_job, self._refresh_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except tk.TclError:
+                    pass
         self._save_geometry()
         if self._on_quit is not None:
             self._on_quit()

@@ -118,6 +118,34 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 
 > `ClipLinesTests` 需要 Tk 显示；在无桌面环境自动 `SkipTest`。
 
+### 2.6 `tests/test_win32_instance.py`（M5 新增）
+
+| 编号 | 用例 | 覆盖点 |
+|---|---|---|
+| SI-01 | `test_first_instance_acquires` | 首个实例拿到命名互斥体 |
+| SI-02 | `test_second_instance_is_rejected` | 第二个实例被拒绝并通知首个实例 |
+| SI-03 | `test_activate_event_wakes_waiter` | 唤起线程 `WaitForSingleObject` 收到事件并投递队列 |
+| SI-04 | `test_wait_times_out_without_signal` | 无信号时等待超时返回 False |
+| SI-05 | `test_close_is_idempotent` | 重复关闭句柄不抛异常 |
+| SI-06 | `test_names_are_isolated` | 不同名字的实例互不影响 |
+
+> 用例使用 `uuid` 生成一次性名字，不干扰真实运行中的程序；无 Windows 时整组跳过。
+
+### 2.7 `tests/test_dialogs.py`（M5 新增）
+
+| 编号 | 用例 | 覆盖点 |
+|---|---|---|
+| DL-01 | `test_preset_selected_when_value_is_preset` | 保留期为 3 时选中预设，自定义框禁用 |
+| DL-02 | `test_custom_selected_when_value_not_preset` | 保留期为 10 时选中「自定义」并填入数值 |
+| DL-03 | `test_save_preset_writes_config` | 选 7 天保存后写入配置并触发刷新回调 |
+| DL-04 | `test_save_custom_value` | 自定义值去除空格后保存 |
+| DL-05 | `test_invalid_custom_value_is_rejected` | 非法值弹提示、原值不变、面板不关闭 |
+| DL-06 | `test_clear_history_calls_callback_and_reports_count` | 确认后调用清空回调并提示删除条数 |
+| DL-07 | `test_clear_history_cancelled_does_nothing` | 取消时不调用回调 |
+| DL-08 | `test_hotkey_label_is_shown` | 面板展示传入的当前热键 |
+
+> 需要 Tk 显示；无桌面环境整组 `SkipTest`。
+
 ## 3. 手动验收清单
 
 前置：`data/` 为空目录，程序首次启动。
@@ -143,12 +171,13 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | A17 | 重新启动 | 历史、置顶、保留期、密码全部保留 |
 | A18 | 把窗口放到 150% 缩放屏幕 | 字不模糊、布局不溢出 |
 
-### 截至 M4 的验收进度（2026-10-21）
+### 截至 M5 的验收进度（2026-10-21）
 
-- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（点击文字卡片写回剪贴板并隐藏窗口，`_copy_item` 用 mock 验证调用与 `withdraw()`）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）。
+- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（点击文字卡片写回剪贴板并隐藏窗口，`_copy_item` 用 mock 验证调用与 `withdraw()`）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A12**（首个实例隐藏窗口后再次启动，第二个进程 exit 0 并唤回首个窗口）、**A13**（`build/purge_probe.py`：过期非置顶记录与图片文件被删、置顶过期保留、`last_purge_at` 写入）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）。
+- 设置面板（A12/A13 的配套）由 `build/settings_probe.py` 验证：预设与自定义保留期写入、非法值拦截、清空历史连带删图片。
 - 待实机验证：**A6**（点击图片卡片写回剪贴板，需要真实粘贴到画图确认）、**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A16**（点「彻底退出」按钮）、**A17**（重启后数据保留）。
-- 尚未实现：**A12**（单实例，M5）、**A13**（清理定时器，M5）、**A14–A15**（二级密码，M6）。
-- 开发期自检脚本 `build/ui_probe.py`（不入库）：进程内渲染窗口 → 测搜索/无结果/清空 → 测置顶重排、复制、删除 → 截图，输出可直接对照本清单。
+- 尚未实现：**A14–A15**（二级密码，M6）。
+- 开发期自检脚本（均不入库）：`build/ui_probe.py`（窗口渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）。
 
 ## 4. 回归清单（每次改代码必过）
 

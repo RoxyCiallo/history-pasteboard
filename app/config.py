@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # pragma: no cover - 仅类型检查期使用
     import db as db_module
 
+#: 程序版本号（设置面板展示；打包发布前在 docs/07 同步更新）。
+APP_VERSION = "0.5.0"
+
 # 保留期默认值与允许范围（见 docs/01 FR-10）
 DEFAULT_RETENTION_DAYS = 3
 MIN_RETENTION_DAYS = 1
@@ -94,6 +97,24 @@ class Config:
             return SPECS[key]
         except KeyError as exc:
             raise KeyError(f"未知的设置键：{key}") from exc
+
+
+def parse_retention_days(text: Any) -> int:
+    """把设置面板里的输入解析成保留天数；非法输入抛 ``ValueError``。
+
+    允许 1–365 的整数；带单位（如 ``"3天"``）或小数一律视为非法，由界面提示重填。
+    """
+    if isinstance(text, bool):
+        raise ValueError("保留天数需要整数")
+    try:
+        days = int(str(text).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"保留天数需要整数，收到：{text!r}") from exc
+    if days < MIN_RETENTION_DAYS:
+        raise ValueError(f"保留天数不能小于 {MIN_RETENTION_DAYS}")
+    if days > MAX_RETENTION_DAYS:
+        raise ValueError(f"保留天数不能大于 {MAX_RETENTION_DAYS}")
+    return days
 
 
 def _to_text(spec: SettingSpec, value: Any) -> str:

@@ -97,5 +97,24 @@ class ConfigTestCase(unittest.TestCase):
         self.assertEqual(self.config.retention_days, 5)
 
 
+class ParseRetentionDaysTests(unittest.TestCase):
+    """设置面板输入 → 保留天数的解析（CF 之外的纯函数）。"""
+
+    def test_accepts_integer_text(self) -> None:
+        self.assertEqual(config.parse_retention_days("3"), 3)
+        self.assertEqual(config.parse_retention_days(" 7 "), 7)
+        self.assertEqual(config.parse_retention_days(365), 365)
+
+    def test_rejects_out_of_range(self) -> None:
+        for value in ("0", "-1", "366", "9999"):
+            with self.assertRaises(ValueError, msg=value):
+                config.parse_retention_days(value)
+
+    def test_rejects_non_integer(self) -> None:
+        for value in ("", "三天", "3.5", None, True):
+            with self.assertRaises(ValueError, msg=repr(value)):
+                config.parse_retention_days(value)
+
+
 if __name__ == "__main__":
     unittest.main()

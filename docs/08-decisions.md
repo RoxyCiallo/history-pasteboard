@@ -141,6 +141,21 @@
 
 ---
 
+## ADR-010 单实例用「命名互斥体 + 命名事件」，不用窗口广播消息
+
+**背景**：双击第二次启动时，应只唤起已有窗口、不产生第二个常驻进程（`docs/01` FR-13 的配套要求）。
+`docs/02` 最初设想用 `RegisterWindowMessageW` + `PostMessage(HWND_BROADCAST)`，但那需要子类化 Tk 窗口的
+WndProc 才能收到自定义消息，实现重、易踩坑。
+
+**决定**：`CreateMutexW(Local\PasteBoard.SingleInstance)` 判定单实例；第二个进程用
+`OpenEventW` + `SetEvent` 通知命名事件 `Local\PasteBoard.Activate`；首个实例起一个后台线程
+`ActivateWatcher` 轮询 `WaitForSingleObject`，收到后往事件队列投递 `("activate", None)`，主窗口 `show()`。
+
+**后果**：不依赖任何窗口句柄或消息循环；首实例若已退出但事件对象残留，最多产生一次空通知，无副作用。
+`Local\` 前缀保证同一登录会话内唯一，不同 Windows 用户互不干扰。
+
+---
+
 ## 待决
 
 | 事项 | 状态 | 说明 |

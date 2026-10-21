@@ -1,12 +1,13 @@
-"""程序入口：日志、数据层、剪贴板监听、全局热键、主窗口装配。
+"""程序入口：单实例、日志、数据层、剪贴板监听、全局热键、主窗口装配。
 
 启动顺序（`docs/02` 线程模型）：
 1. 开高 DPI 感知（必须在创建 Tk 之前）；
 2. 解析数据目录 → 初始化日志；
-3. 打开数据库、读取配置；
-4. 启动剪贴板监听线程与热键线程；
-5. 进入 tkinter 主循环；
-6. 退出时按相反顺序收尾。
+3. 单实例判定：已有实例在跑就通知它唤出窗口，本进程直接退出；
+4. 打开数据库、读取配置；
+5. 启动剪贴板监听、热键、唤起等待线程；
+6. 进入 tkinter 主循环；
+7. 退出时按相反顺序收尾。
 """
 
 from __future__ import annotations
@@ -98,13 +99,22 @@ def main() -> int:
     install_excepthooks()
     LOGGER.info("程序启动：数据目录 %s", data_dir)
 
+    instance = win32.SingleInstance()
+    if not instance.acquire():
+        LOGGER.info("已有实例在运行，已通知其唤出窗口，本进程退出")
+        return 0
+
     events: "queue.Queue" = queue.Queue()
     database = None
     listener = None
     hotkey = None
+    watcher = None
     try:
         database = db.Database(storage.db_path(data_dir))
         cfg = config.Config(database)
+
+        watcher = win32.ActivateWatcher(instance, events)
+        watcher.start()
 
         listener = clipboard.ClipboardListener(database, data_dir, events)
         listener.start()
@@ -123,8 +133,11 @@ def main() -> int:
             listener.stop()
         if hotkey is not None:
             hotkey.stop()
+        if watcher is not None:
+            watcher.stop()
         if database is not None:
             database.close()
+        instance.close()
         LOGGER.info("程序已退出")
 
 

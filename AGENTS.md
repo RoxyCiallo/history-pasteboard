@@ -108,8 +108,8 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 
 ## 9. 当前状态
 
-- 阶段：**M4 卡片与核心交互已完成**（M0 工程底座 → M1 数据层 → M2 系统能力层 → M3 界面骨架 → M4 卡片交互），当前 80 个单元测试全绿。
-- 已能：后台记录文字与图片、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板并隐藏窗口、置顶/取消置顶、删除（连带图片文件）、悬停态、分页加载、关闭隐藏、`Ctrl+Shift+V` 唤回、彻底退出清理。
-- 下一步：`docs/05-roadmap.md` 的 M5（单实例、保留期清理定时器、设置面板）。
-- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`、`app/main.py`、`app/ui/{__init__,theme,card,main_window}.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`。
-- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py` 可在进程内渲染窗口、测搜索/置顶/复制/删除并截图。
+- 阶段：**M5 生命周期与设置已完成**（M0 工程底座 → M1 数据层 → M2 系统能力层 → M3 界面骨架 → M4 卡片交互 → M5 生命周期与设置），当前 97 个单元测试全绿。
+- 已能：后台记录文字与图片、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板并隐藏窗口、置顶/取消置顶、删除（连带图片文件）、悬停态、分页加载、关闭隐藏、`Ctrl+Shift+V` 唤回（被占用时自动回退 `Ctrl+Alt+V` / `Ctrl+Shift+H`）、单实例（重复启动唤出已有窗口）、保留期自动清理（启动一次 + 每 10 分钟，连带删图片文件）、设置面板（保留期 1/3/5/7+自定义、清空历史、数据目录、版本）、彻底退出清理。
+- 下一步：`docs/05-roadmap.md` 的 M6（二级密码）。
+- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`、`app/main.py`、`app/ui/{__init__,theme,card,main_window,dialogs}.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`。
+- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py`（渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）。

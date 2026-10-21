@@ -79,6 +79,8 @@ def purge_expired(self, days: int) -> int:
 - **圆角用显式圆弧采样**（`ui.card.rounded_points(..., steps=4)` 生成多段线），`create_polygon(smooth=True)` 的三个控制点只能磨出 1–2px 的钝角，达不到设计稿的 10px 圆角。
 - 卡片是 `Canvas` + 内嵌 `Frame`：参与「悬停换底色」的子控件必须登记到 `_tint_widgets`，否则悬停时会留一块白色方块。
 - 搜索框占位符用 `_placeholder_active` 标志维护，取值前先判断标志，不要把占位文本当关键字去查询。
+- **对话框一次性使用**：`SettingsDialog` 等 `Toplevel` 关闭即 `destroy()`；主窗口保留引用（`self._settings_dialog`）并用 `winfo_exists()` 判断，已销毁就重建，避免重复打开多个面板。
+- **对话框只做界面**：需要改动数据的动作（如清空历史）通过回调交回 `MainWindow`，对话框本身不直接操作数据库；保存失败要在对话框内提示，不能静默关闭。
 
 ## 5.1 线程规则
 
