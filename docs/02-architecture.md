@@ -32,6 +32,8 @@ app/
    └─ dialogs.py    密码、设置、确认、提示、关于
 ```
 
+> 已落地：`main.py`、`theme.py`、`main_window.py`（M3）；`card.py`、`dialogs.py`、`security.py` 待后续里程碑。
+
 ### 模块职责与依赖
 
 | 模块 | 职责 | 允许依赖 |
@@ -171,11 +173,11 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 | `RegisterClipboardFormatW` | 检测 `ExcludeClipboardContentFromMonitorProcessing` 等标记 | 存在即视为私密 | ✅ |
 | `EmptyClipboard/SetClipboardData` + `GlobalAlloc/GlobalLock/GlobalUnlock` | 写文本（`CF_UNICODETEXT`）、写图片（`CF_DIB`） | `GMEM_MOVEABLE`；CF_DIB = BMP 去掉 14 字节文件头 | ✅ |
 | `GetClipboardData(CF_HDROP)` 等图片文件列表 | 复制「图片文件」时识别为图片 | 由 Pillow `ImageGrab.grabclipboard()` 处理 | ✅ |
-| `RegisterHotKey/UnregisterHotKey` | `Ctrl+Shift+V` | 独立线程 + `GetMessage` | ⏳ M5 |
+| `RegisterHotKey/UnregisterHotKey` | `Ctrl+Shift+V` | 独立线程 + `GetMessage` 循环；`PostThreadMessage(WM_QUIT)` 退出 | ✅（M3 提前落地，M5 只做失败备选键） |
 | `CreateMutexW` | 单实例 | `Global\PasteBoard.SingleInstance` | ⏳ M5 |
 | `RegisterWindowMessageW` + `PostMessage(HWND_BROADCAST)` | 唤醒已有实例 | 自定消息 ID | ⏳ M5 |
-| `SetForegroundWindow/ShowWindow` | 唤出置前 | 先 `SetForegroundWindow` 再 `lift` | ⏳ M3 |
-| `SetProcessDpiAwareness` (`shcore`) | 高清缩放 | 失败回退 `user32.SetProcessDPIAware` | ⏳ M3 |
+| `SetForegroundWindow/ShowWindow` | 唤出置前 | 目前用 tkinter `deiconify + lift + topmost` 实现 | ✅（M3，tkinter 方案） |
+| `SetProcessDpiAwareness` (`shcore`) | 高清缩放 | 失败回退 `user32.SetProcessDPIAware` | ✅（M3） |
 
 ## 8. 剪贴板监听：为什么用轮询
 

@@ -69,10 +69,13 @@ def purge_expired(self, days: int) -> int:
 
 - **禁止跨线程操作控件**：子线程结果一律 `queue.put()`，主线程 `after(120, ...)` 消费。
 - `PhotoImage` 必须持有引用（存到卡片对象属性），否则会被 GC 变空白。
+- 图片缩略图统一走 `MainWindow._thumb_cache`（以相对路径为键）缓存 `PhotoImage`：既能保住引用，又能避免每次 `refresh()` 重复读盘与重复解码（M3 实测每次刷新都重读会产生大量 `libpng warning: iCCP`，并拖慢滚动）。
 - 长列表不要一次 `grid` 上千个控件：分页 200 条。
 - 定时器统一用 `widget.after()`，退出前 `after_cancel` 并用 `_closing` 标志防止回调访问已销毁控件。
 - 主窗口用 `withdraw()/deiconify()` 隐藏与唤出，不用 `destroy()` 关闭（会丢状态）。
 - 所有 `Toplevel` 设置 `transient(master)` + `grab_set()`，并处理 `WM_DELETE_WINDOW`。
+- Canvas 内嵌 Frame 列表：`<Configure>` 里更新 `scrollregion`，canvas 宽度变化时同步 `itemconfigure(width=...)` 并刷新所有 Label 的 `wraplength`，否则换行宽度不跟随窗口。
+- 搜索框占位符用 `_placeholder_active` 标志维护，取值前先判断标志，不要把占位文本当关键字去查询。
 
 ## 5.1 线程规则
 
@@ -97,7 +100,7 @@ def purge_expired(self, days: int) -> int:
 
 - 框架：标准库 `unittest`；命令 `python -m unittest discover -s tests -v`。
 - 纯逻辑必须可测：`db`、`security`、`storage` 的路径拼接与哈希、`clipboard` 的内容规范化函数。
-- 每个测试用独立临时目录（`tempfile.TemporaryDirectory`），不碰真实 `data/`。
+- 每个测试用独立临时目录（**用 `tests/tmpdir.py`，不要用 `tempfile.TemporaryDirectory`** —— 后者在 Windows 沙箱下会把目录 ACL 改成当前受限令牌无法访问，SQLite 报 `unable to open database file`），不碰真实 `data/`。
 - 涉及 Win32/剪贴板的逻辑拆成两层：**纯函数**（可测）+ **薄封装**（不测）。
 - 新增功能必须同时新增或更新测试；失败用例优先于成功用例覆盖边界。
 

@@ -108,6 +108,8 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 
 ## 9. 当前状态
 
-- 阶段：**M2 系统能力层已完成**（M0 工程底座 → M1 数据层 → M2 剪贴板监听），当前 64 个单元测试全绿。
-- 下一步：`docs/05-roadmap.md` 的 M3（界面骨架）。
-- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`。
+- 阶段：**M3 界面骨架已完成**（M0 工程底座 → M1 数据层 → M2 系统能力层 → M3 界面骨架），当前 64 个单元测试全绿。
+- 已能：后台记录文字与图片、窗口显示卡片列表、搜索过滤、置顶排序、关闭隐藏、`Ctrl+Shift+V` 唤回、彻底退出清理。
+- 下一步：`docs/05-roadmap.md` 的 M4（卡片组件与点击复制/置顶/删除等核心交互）。
+- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`、`app/main.py`、`app/ui/{__init__,theme,main_window}.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`。
+- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py` 可在进程内渲染窗口、测搜索/隐藏并截图。
