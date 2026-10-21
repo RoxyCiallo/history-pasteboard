@@ -161,19 +161,21 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 
 ## 7. Win32 API 清单（win32.py）
 
-| API | 用途 | 注意 |
-|---|---|---|
-| `GetClipboardSequenceNumber` | 轮询判断变化 | 无锁、极轻 |
-| `OpenClipboard/CloseClipboard` | 访问剪贴板 | 必须成对；失败重试 3 次 × 20ms |
-| `GetClipboardData(CF_UNICODETEXT)` | 读文本 | `ctypes.wstring_at` |
-| `RegisterClipboardFormatW` | 检测 `ExcludeClipboardContentFromMonitorProcessing`、`Clipboard Viewer Ignore` | 存在即视为私密 |
-| `GlobalAlloc/GlobalLock/GlobalUnlock` | 写剪贴板 | `GMEM_MOVEABLE` |
-| `EmptyClipboard/SetClipboardData` | 写文本/图片 | 写图片用 `CF_DIB` |
-| `RegisterHotKey/UnregisterHotKey` | `Ctrl+Shift+V` | 独立线程 + `GetMessage` |
-| `CreateMutexW` | 单实例 | `Global\PasteBoard.SingleInstance` |
-| `RegisterWindowMessageW` + `PostMessage(HWND_BROADCAST)` | 唤醒已有实例 | 自定消息 ID |
-| `SetForegroundWindow/ShowWindow` | 唤出置前 | 先 `SetForegroundWindow` 再 `lift` |
-| `SetProcessDpiAwareness` (`shcore`) | 高清缩放 | 失败回退 `user32.SetProcessDPIAware` |
+状态：✅ 已实现（M2） · ⏳ 待实现（标注里程碑）
+
+| API | 用途 | 注意 | 状态 |
+|---|---|---|---|
+| `GetClipboardSequenceNumber` | 轮询判断变化 | 无锁、极轻 | ✅ |
+| `OpenClipboard/CloseClipboard` | 访问剪贴板 | 必须成对；失败重试 3 次 × 20ms | ✅ |
+| `GetClipboardData(CF_UNICODETEXT)` | 读文本 | `ctypes.wstring_at` | ✅ |
+| `RegisterClipboardFormatW` | 检测 `ExcludeClipboardContentFromMonitorProcessing` 等标记 | 存在即视为私密 | ✅ |
+| `EmptyClipboard/SetClipboardData` + `GlobalAlloc/GlobalLock/GlobalUnlock` | 写文本（`CF_UNICODETEXT`）、写图片（`CF_DIB`） | `GMEM_MOVEABLE`；CF_DIB = BMP 去掉 14 字节文件头 | ✅ |
+| `GetClipboardData(CF_HDROP)` 等图片文件列表 | 复制「图片文件」时识别为图片 | 由 Pillow `ImageGrab.grabclipboard()` 处理 | ✅ |
+| `RegisterHotKey/UnregisterHotKey` | `Ctrl+Shift+V` | 独立线程 + `GetMessage` | ⏳ M5 |
+| `CreateMutexW` | 单实例 | `Global\PasteBoard.SingleInstance` | ⏳ M5 |
+| `RegisterWindowMessageW` + `PostMessage(HWND_BROADCAST)` | 唤醒已有实例 | 自定消息 ID | ⏳ M5 |
+| `SetForegroundWindow/ShowWindow` | 唤出置前 | 先 `SetForegroundWindow` 再 `lift` | ⏳ M3 |
+| `SetProcessDpiAwareness` (`shcore`) | 高清缩放 | 失败回退 `user32.SetProcessDPIAware` | ⏳ M3 |
 
 ## 8. 剪贴板监听：为什么用轮询
 

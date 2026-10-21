@@ -108,5 +108,6 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 
 ## 9. 当前状态
 
-- 阶段：**M0 工程底座**（文档与日志体系），代码尚未开始。
-- 下一里程碑：见 `docs/05-roadmap.md` 的 M1。
+- 阶段：**M2 系统能力层已完成**（M0 工程底座 → M1 数据层 → M2 剪贴板监听），当前 64 个单元测试全绿。
+- 下一步：`docs/05-roadmap.md` 的 M3（界面骨架）。
+- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`。

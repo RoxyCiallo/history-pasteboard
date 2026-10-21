@@ -74,6 +74,13 @@ def purge_expired(self, days: int) -> int:
 - 主窗口用 `withdraw()/deiconify()` 隐藏与唤出，不用 `destroy()` 关闭（会丢状态）。
 - 所有 `Toplevel` 设置 `transient(master)` + `grab_set()`，并处理 `WM_DELETE_WINDOW`。
 
+## 5.1 线程规则
+
+- 继承 `threading.Thread` 时，**不要**把自己的停止标志命名为 `_stop`：`Thread` 内部已有 `_stop()` 方法，赋值会把它覆盖掉（M2 踩过，报 `AttributeError: 'function' object has no attribute 'clear'`）。统一用 `self._stop_event = threading.Event()`。
+- 等待用 `event.wait(timeout)` 而不是 `time.sleep()`，这样 `stop()` 能立刻生效。
+- 线程 `run()` 里必须 `try/except` 包住单轮循环体：一次读取失败不能终止整个监听（只记日志）。
+
+
 ## 6. 错误处理
 
 | 场景 | 做法 |

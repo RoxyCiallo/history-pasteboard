@@ -83,13 +83,23 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 
 | ID | 场景 | 预期 |
 |---|---|---|
-| CB-01 | `normalize_text` 去首尾空白 | 返回精简文本 |
-| CB-02 | 纯空白文本 | 返回 None（不记录） |
+| CB-01 | `normalize_text` 去首尾空白、统一换行 | `"  a\r\nb\rc  "` → `"a\nb\nc"` |
+| CB-02 | 纯空白文本 / None | 返回 None（不记录） |
 | CB-03 | 超长文本（>1MB） | 返回 None |
-| CB-04 | hash 稳定 | 同文本两次 hash 相同 |
-| CB-05 | 图片尺寸超限 | `is_acceptable_image` 返回 False |
-| CB-06 | 图片大小超限（>20MB） | 返回 False |
-| CB-07 | 正常图片 | 返回 True |
+| CB-04 | hash 稳定 | 同文本两次 hash 相同，不同文本不同 |
+| CB-05 | 图片尺寸超限 / 零尺寸 | `is_acceptable_image` 返回 False |
+| CB-06 | 非图片对象 | `is_acceptable_image` 返回 False（字节上限由 `storage.save_image` 返回 None 拒绝） |
+| CB-07 | 正常图片、边界尺寸 8000px | 返回 True |
+| CT-01 | 捕获文本 | 入库 kind=text，内容已去空白 |
+| CT-02 | 捕获私密文本 | `is_private=True` |
+| CT-03 | 重复内容 | 不新增，`created=False`，id 不变 |
+| CT-04 | 空剪贴板 | 返回 None，不入库 |
+| CT-05 | 捕获图片 | kind=image，原图与缩略图落盘，宽高正确 |
+| CT-06 | 尺寸超限图片 | 返回 None，不入库 |
+| CT-07 | 同时有文本与图片 | 优先记文本 |
+| CT-08 | 文本超长但有图片 | 回退记图片 |
+
+> 真实剪贴板的读写不走单元测试（依赖桌面会话），用 `tools/clipboard_watch.py` 手动验证。
 
 ## 3. 手动验收清单
 
