@@ -27,8 +27,10 @@ Windows 本地剪贴板历史工具：后台常驻记录文字与图片，`Ctrl+
 | `app/` | 程序源码（见 `docs/02`） | 开发时 |
 | `assets/` | 图标等静态资源（`app.ico` 由 `make_icon.py` 生成，入库） | 换图标时 |
 | `make_icon.py` | 生成 `assets/app.ico`（Pillow 绘制，开发期脚本，入库） | 换图标时 |
+| `make_version_info.py` | 从 `app/config.py` 的 `APP_VERSION` 生成 exe 版本资源 `build/version_info.txt` | 发版号时 |
+| `CHANGELOG.md` | 版本更新日志（Keep a Changelog 风格，中文） | **每次发版必须追加** |
 | `tests/` | 单元测试（纯逻辑，不依赖桌面） | 同步于功能开发 |
-| `build_exe.ps1` | 打包脚本（安装 PyInstaller → 测试 → 打包 → 校验） | 打包流程变化时 |
+| `build_exe.ps1` | 打包脚本（找 Python → 图标 + 版本资源 → 测试 → onedir 打包 → 校验），默认 onedir、`-Onefile` 回退 | 打包流程变化时 |
 | `data/` | **运行时**数据（`history.db`、`images/`、`thumbs/`、`app.log`），不进版本库 | 不需要手改 |
 
 ## 3. 开工前的必读顺序
@@ -86,8 +88,17 @@ python tools/devlog.py done "完成剪贴板监听线程"
 python tools/devlog.py todo "补图片上限测试"
 python tools/devlog.py status          # 查看当天日志
 
-# 打包（需联网装 PyInstaller，见 docs/07）
+# 打包（默认 onedir，产物 dist\PasteBoard\；首次需联网装 PyInstaller，见 docs/07）
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
+
+# 首次联网安装 PyInstaller 再打包
+powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Install
+
+# 回退成单文件（会解压到 %TEMP%，普通用户可能失败）
+powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Onefile
+
+# 发版：改 APP_VERSION → 更新 CHANGELOG.md → 生成版本资源 → 打包
+python make_version_info.py --check
 ```
 > 说明：`python` 指本机 Python；若未进 PATH，用第 6 节第一条的绝对路径。
 
@@ -109,8 +120,9 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 
 ## 9. 当前状态
 
-- 阶段：**M0–M7 全部完成**，当前 114 个单元测试全绿，已产出 `dist/PasteBoard.exe`（30.5 MB）。
-- 已能：后台记录文字与图片、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板并隐藏窗口、置顶/取消置顶、删除（连带图片文件）、悬停态、分页加载、关闭隐藏、`Ctrl+Shift+V` 唤回（被占用时自动回退 `Ctrl+Alt+V` / `Ctrl+Shift+H`）、单实例（重复启动唤出已有窗口）、保留期自动清理（启动一次 + 每 10 分钟，连带删图片文件）、设置面板（保留期 1/3/5/7+自定义、清空历史、数据目录、版本、重置密码）、彻底退出清理、**二级密码**（私密卡打码、首次点击设置密码、解锁后本会话可见可复制、错误 5 次冷却 30 秒、空闲 5 分钟或窗口隐藏自动上锁）、PyInstaller 打包（单文件与 `-Onedir` 回退）。
-- 下一步：实机复验 `docs/06-test-plan.md` 的 A6/A11/A16/A17 与 `docs/07` 的 R2–R6、R8；之后的打磨项（搜索框圆角、`libpng` 噪声、exe 版本资源）见 `docs/05-roadmap.md` 的已知限制。
-- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`、`app/security.py`、`app/main.py`、`app/ui/{__init__,theme,card,main_window,dialogs}.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`、`make_icon.py`、`build_exe.ps1`。
-- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py`（渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）、`build/security_probe.py`（二级密码全流程）、`build/m6_settings_probe.py`（设置面板重置密码）。
+- 阶段：**0.2.0 已完成**（M0–M7 交付 + 用户实测反馈修复），当前 **125 个单元测试全绿**，产物为文件夹绿色版 `dist/PasteBoard/PasteBoard.exe`（5.1 MB，文件夹共 74.2 MB）。
+- 已能：后台记录文字与图片、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板（**窗口保持打开**，自身写入不回灌历史）、置顶/取消置顶、删除（连带图片文件）、**查看全文弹窗**、悬停态、分页加载、关闭隐藏、`Ctrl+Shift+V` 唤回（被占用时自动回退 `Ctrl+Alt+V` / `Ctrl+Shift+H`）、单实例（重复启动唤出已有窗口）、保留期自动清理（启动一次 + 每 10 分钟，连带删图片文件）、设置面板（保留期 1/3/5/7+自定义、清空历史、数据目录、版本、重置密码）、彻底退出清理、**二级密码**（私密卡打码、首次点击设置密码、解锁后本会话可见可复制、错误 5 次冷却 30 秒、空闲 5 分钟或窗口隐藏自动上锁）、PyInstaller **onedir** 打包（`-Onefile` 仍可选）与 exe 版本资源。
+- 版本号规则：`app/config.py` 的 `APP_VERSION` 是唯一来源；发版时同步更新 `CHANGELOG.md`，打包前运行 `python make_version_info.py`。
+- 下一步：实机复验 `docs/06-test-plan.md` 的 A6/A11/A16/A17/A19（实进程部分）/A21 与 `docs/07` 的 R2–R6、R8；之后的打磨项（搜索框圆角、toast、`libpng` 噪声）见 `docs/05-roadmap.md` 的已知限制。
+- 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`、`app/security.py`、`app/main.py`、`app/ui/{__init__,theme,card,main_window,dialogs}.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`、`make_icon.py`、`make_version_info.py`、`build_exe.ps1`。
+- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py`（渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）、`build/security_probe.py`（二级密码全流程）、`build/m6_settings_probe.py`（设置面板重置密码）、`build/v02_probe.py`（查看全文、复制不回灌）。

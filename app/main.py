@@ -124,7 +124,14 @@ def main() -> int:
         hotkey = win32.HotkeyThread(events)
         hotkey.start()
 
-        window = MainWindow(database, cfg, data_dir, events, security_guard=security_guard)
+        window = MainWindow(
+            database,
+            cfg,
+            data_dir,
+            events,
+            security_guard=security_guard,
+            clipboard_listener=listener,
+        )
         window.mainloop()
         return 0
     except Exception:  # noqa: BLE001 - 启动失败要留下日志而不是闪退

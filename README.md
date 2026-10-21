@@ -1,8 +1,8 @@
-# 历史粘贴板
+# 历史粘贴板 0.2.0
 
 > Windows 本地剪贴板历史工具：复制过的文字和图片不丢，按 `Ctrl+Shift+V` 随时找回、搜索、再粘一次。
 
-- 绿色免安装，单个 `PasteBoard.exe`
+- 绿色免安装**文件夹版**，普通用户双击即可运行（无需管理员权限）
 - 完全离线，数据只存在本机 `data/` 目录
 - 淡蓝色简洁卡片界面
 
@@ -14,7 +14,8 @@
 | 时间倒序 | 最近复制的在最上面 |
 | 置顶 | 常用内容固定在最前，且永不过期 |
 | 搜索 | 输入关键字即时过滤历史 |
-| 再次粘贴 | 点一下卡片，内容回到剪贴板，切到目标窗口 `Ctrl+V` 即可 |
+| 再次粘贴 | 点一下卡片，内容回到剪贴板并提示；切到目标窗口 `Ctrl+V` 即可（不会重复记入历史） |
+| 查看全文 | 超过 3 行的文字可点「查看全文 ›」弹窗阅读并一键复制 |
 | 保留期 | 1/3/5/7 天或自定义 1–365 天，过期自动清理 |
 | 敏感内容 | 密码类内容自动打码并加锁，输入二级密码才能查看 |
 | 热键唤出 | `Ctrl+Shift+V` 随时叫出主界面 |
@@ -22,12 +23,14 @@
 
 ## 快速开始
 
-**使用安装包 / exe**
+**使用打包好的文件夹版**
 
-1. 双击 `PasteBoard.exe`，主界面出现。
+1. 打开 `dist\PasteBoard\`，双击 `PasteBoard.exe`，主界面出现。
 2. 正常复制文字、截图，历史自动累积。
 3. 关闭窗口只是隐藏；按 `Ctrl+Shift+V` 唤回。
 4. 要结束程序，点底部「彻底退出」。
+
+> 整个 `PasteBoard` 文件夹可以拷到任意位置使用；历史数据在文件夹内的 `data\`，随文件夹一起走。
 
 **从源码运行**
 
@@ -39,10 +42,17 @@
 & 'C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\pythonw.exe' app/main.py
 ```
 
-**打包成 exe**
+**打包**
 
 ```powershell
+# 默认 onedir 文件夹版（推荐，普通用户可直接运行）
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
+
+# 首次需要联网安装 PyInstaller
+powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Install
+
+# 回退成单文件（会解压到 %TEMP%，权限受限时可能失败）
+powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Onefile
 ```
 
 详见 [docs/07-release.md](docs/07-release.md)。
@@ -67,6 +77,7 @@ data/
 | 文档 | 内容 |
 |---|---|
 | [AGENTS.md](AGENTS.md) | 给开发者/AI 的入口说明：目录地图、约束、工作流程 |
+| [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
 | [docs/01-requirements.md](docs/01-requirements.md) | 需求规格与验收标准 |
 | [docs/02-architecture.md](docs/02-architecture.md) | 技术方案、模块、线程、数据库 |
 | [docs/03-design-spec.md](docs/03-design-spec.md) | 视觉与交互规范 |
@@ -79,9 +90,10 @@ data/
 
 ## 当前状态
 
-- 阶段：**M0–M7 全部完成**（工程底座、数据层、系统能力层、界面骨架、卡片交互、生命周期与设置、二级密码、打包发布）。
-- 已能：后台自动记录文字与图片（重复内容只刷新时间）、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板并隐藏、置顶/取消置顶、删除、关闭后继续记录、`Ctrl+Shift+V` 唤回（被占用时自动回退备选键）、重复启动只唤出已有窗口、保留期自动清理、设置面板（保留期/清空历史/数据目录/版本/重置密码）、敏感内容打码与二级密码（错误 5 次冷却 30 秒、空闲 5 分钟自动上锁）、彻底退出。
-- 打包产物：`dist/PasteBoard.exe`（单文件 30.5 MB）；临时目录受限的机器可用 `build_exe.ps1 -Onedir` 生成文件夹版。
+- 版本：**0.2.0**（2026-10-21）。完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+- 阶段：M0–M7 交付完成 + 用户实测反馈修复。
+- 已能：后台自动记录文字与图片（重复内容只刷新时间）、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板（**窗口保持打开**且不会回灌历史）、查看全文弹窗、置顶/取消置顶、删除、关闭后继续记录、`Ctrl+Shift+V` 唤回（被占用时自动回退备选键）、重复启动只唤出已有窗口、保留期自动清理、设置面板（保留期/清空历史/数据目录/版本/重置密码）、敏感内容打码与二级密码（错误 5 次冷却 30 秒、空闲 5 分钟自动上锁）、彻底退出。
+- 打包产物：`dist\PasteBoard\PasteBoard.exe`（5.1 MB，文件夹共 74.2 MB），exe 版本资源为 0.2.0。
 - 进度见 [docs/05-roadmap.md](docs/05-roadmap.md)，已知限制见 [docs/07-release.md](docs/07-release.md) 与 [docs/06-test-plan.md](docs/06-test-plan.md) 的待实机项。
 
 ## 系统要求

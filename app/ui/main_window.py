@@ -74,6 +74,7 @@ class MainWindow(tk.Tk):
         event_queue: "queue.Queue | None" = None,
         on_quit=None,
         security_guard=None,
+        clipboard_listener=None,
     ) -> None:
         super().__init__()
         self._database = database
@@ -82,6 +83,7 @@ class MainWindow(tk.Tk):
         self._queue = event_queue
         self._on_quit = on_quit
         self._security = security_guard
+        self._listener = clipboard_listener
         self._closing = False
         self._keyword = ""
         self._search_job = None
@@ -100,6 +102,7 @@ class MainWindow(tk.Tk):
         self._hotkey_label = DEFAULT_HOTKEY_LABEL
         self._settings_dialog: "dialogs.SettingsDialog | None" = None
         self._password_dialog: "dialogs.PasswordDialog | None" = None
+        self._detail_dialog: "dialogs.TextDetailDialog | None" = None
 
         self._apply_scaling()
         self._fonts = theme.Fonts(self)
@@ -440,6 +443,7 @@ class MainWindow(tk.Tk):
                 on_pin=self._toggle_pin,
                 on_delete=self._delete_item,
                 on_unlock=self._unlock_item,
+                on_view=self._view_item,
                 unlocked=unlocked,
             )
             clip.pack(fill="x", pady=(0, theme.GAP_CARD))
@@ -492,30 +496,38 @@ class MainWindow(tk.Tk):
     # ---- 卡片动作 ---------------------------------------------------
 
     def _copy_item(self, item: dict) -> None:
-        """把卡片内容写回系统剪贴板，然后隐藏窗口，方便直接 Ctrl+V。"""
+        """把卡片内容写回系统剪贴板，窗口保持打开并提示。
+
+        写剪贴板前先通知监听线程跳过这一次变化，避免「从历史复制」又被记进历史。
+        """
         unlocked = self._security is not None and self._security.unlocked
         if bool(item.get("is_private")) and not unlocked:
             self._unlock_item(item)
             return
+        if self._listener is not None:
+            self._listener.suppress_once()
         ok = False
-        if item.get("kind") == "text":
-            ok = win32.set_clipboard_text(item.get("text_content") or "")
-        else:
-            path = storage.image_abs_path(self._data_dir, item.get("image_path"))
-            if path is not None and path.exists():
-                try:
-                    with Image.open(path) as source:
-                        ok = win32.set_clipboard_image(source.copy())
-                except (OSError, ValueError):
-                    _LOGGER.exception("读取图片失败，id=%s", item.get("id"))
+        try:
+            if item.get("kind") == "text":
+                ok = win32.set_clipboard_text(item.get("text_content") or "")
+            else:
+                path = storage.image_abs_path(self._data_dir, item.get("image_path"))
+                if path is not None and path.exists():
+                    try:
+                        with Image.open(path) as source:
+                            ok = win32.set_clipboard_image(source.copy())
+                    except (OSError, ValueError):
+                        _LOGGER.exception("读取图片失败，id=%s", item.get("id"))
+        except win32.ClipboardError:
+            _LOGGER.exception("写入剪贴板失败，id=%s", item.get("id"))
+            ok = False
         if not ok:
             self._flash_status("复制失败：剪贴板被占用，请稍后重试")
             return
         _LOGGER.info("已复制回剪贴板，id=%s", item.get("id"))
         if self._security is not None:
             self._security.touch()
-        # 复制后的隐藏不弹首次提示，用户正在连用，不需要教学文案。
-        self.withdraw()
+        self._flash_status("已复制到剪贴板，可切到目标程序粘贴")
 
     def _toggle_pin(self, item: dict) -> None:
         self._database.toggle_pin(item.get("id"))
@@ -538,6 +550,19 @@ class MainWindow(tk.Tk):
                 if key:
                     self._thumb_cache.pop(key, None)
         self.refresh()
+
+    def _view_item(self, item: dict) -> None:
+        """「查看全文」：只读对话框展示完整文本，可一键复制。"""
+        if self._detail_dialog is not None and self._detail_dialog.winfo_exists():
+            self._detail_dialog.lift()
+            self._detail_dialog.focus_set()
+            return
+        self._detail_dialog = dialogs.TextDetailDialog(
+            self,
+            self._fonts,
+            item.get("text_content") or "",
+            on_copy=lambda: self._copy_item(item),
+        )
 
     def _unlock_item(self, item: dict) -> None:
         """私密卡片被点击：已解锁直接复制，否则先设置/输入二级密码。"""

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 from typing import Callable
 
 import config
@@ -25,6 +25,9 @@ DIALOG_WIDTH = 560
 DIALOG_PAD = 20
 
 PASSWORD_DIALOG_WIDTH = 380
+
+TEXT_DIALOG_WIDTH = 620
+TEXT_DIALOG_HEIGHT = 480
 
 
 class SettingsDialog(tk.Toplevel):
@@ -703,6 +706,165 @@ class PasswordDialog(tk.Toplevel):
         self.update_idletasks()
         width = max(self.winfo_reqwidth(), PASSWORD_DIALOG_WIDTH)
         height = self.winfo_reqheight()
+        try:
+            root_x = master.winfo_rootx()
+            root_y = master.winfo_rooty()
+            root_w = master.winfo_width()
+            root_h = master.winfo_height()
+        except tk.TclError:
+            root_x = root_y = 0
+            root_w = root_h = 0
+        x = root_x + max((root_w - width) // 2, 0)
+        y = root_y + max((root_h - height) // 3, 0)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+
+class TextDetailDialog(tk.Toplevel):
+    """「查看全文」对话框：只读展示完整文本，可一键复制。"""
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        fonts: theme.Fonts,
+        text: str,
+        *,
+        on_copy: Callable[[], None] | None = None,
+        title: str = "查看全文",
+    ) -> None:
+        super().__init__(master)
+        self._fonts = fonts
+        self._text = text
+        self._on_copy = on_copy
+        self._copy_button: tk.Button | None = None
+        self._count_label: tk.Label | None = None
+
+        self.title(title)
+        self.configure(bg=theme.BG_ROOT)
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self._build()
+        self._place_centered(master)
+
+    def _build(self) -> None:
+        body = tk.Frame(self, bg=theme.BG_ROOT, padx=DIALOG_PAD, pady=DIALOG_PAD)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(
+            body,
+            text="查看全文",
+            font=self._fonts.title(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_PRIMARY,
+            anchor="w",
+        ).pack(fill="x")
+
+        text_area = tk.Frame(body, bg=theme.BG_ROOT)
+        text_area.pack(fill="both", expand=True, pady=(12, 0))
+
+        scrollbar = ttk.Scrollbar(text_area, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+        viewer = tk.Text(
+            text_area,
+            wrap="word",
+            width=40,
+            height=10,
+            font=self._fonts.body(),
+            bg=theme.BG_CARD,
+            fg=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY,
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=10,
+            spacing1=2,
+            spacing3=2,
+            yscrollcommand=scrollbar.set,
+        )
+        viewer.pack(side="left", fill="both", expand=True)
+        scrollbar.configure(command=viewer.yview)
+        viewer.insert("1.0", self._text)
+        viewer.configure(state="disabled")
+
+        footer = tk.Frame(body, bg=theme.BG_ROOT)
+        footer.pack(fill="x", pady=(12, 0))
+
+        self._count_label = tk.Label(
+            footer,
+            text=f"共 {len(self._text)} 字",
+            font=self._fonts.small(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_SECONDARY,
+        )
+        self._count_label.pack(side="left")
+
+        self._button(
+            footer,
+            "关闭",
+            self.destroy,
+            bg=theme.BG_CARD,
+            fg=theme.TEXT_PRIMARY,
+            hover=theme.PRIMARY_LIGHT,
+            border=True,
+        ).pack(side="right")
+        if self._on_copy is not None:
+            self._copy_button = self._button(
+                footer,
+                "复制全文",
+                self._copy_all,
+                bg=theme.PRIMARY,
+                fg=theme.TEXT_ON_PRIMARY,
+                hover=theme.PRIMARY_HOVER,
+            )
+            self._copy_button.pack(side="right", padx=(0, 8))
+
+    def _button(self, parent, text, command, *, bg, fg, hover, border=False) -> tk.Button:
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=self._fonts.body(),
+            bg=bg,
+            fg=fg,
+            activebackground=hover,
+            activeforeground=fg,
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=5,
+            cursor="hand2",
+        )
+        if border:
+            button.configure(
+                highlightthickness=1,
+                highlightbackground=theme.BORDER,
+                highlightcolor=theme.BORDER_FOCUS,
+            )
+        return button
+
+    def _copy_all(self) -> None:
+        if self._on_copy is None:
+            return
+        try:
+            self._on_copy()
+        except Exception:  # pragma: no cover - 复制失败只影响提示
+            _LOGGER.exception("复制全文失败")
+            if self._count_label is not None:
+                self._count_label.configure(text="复制失败，请重试")
+            return
+        if self._copy_button is not None:
+            self._copy_button.configure(text="已复制 ✓")
+            self.after(1500, self._restore_copy_button)
+
+    def _restore_copy_button(self) -> None:
+        if self._copy_button is not None and self._copy_button.winfo_exists():
+            self._copy_button.configure(text="复制全文")
+
+    def _place_centered(self, master: tk.Misc) -> None:
+        self.update_idletasks()
+        width = max(self.winfo_reqwidth(), TEXT_DIALOG_WIDTH)
+        height = max(self.winfo_reqheight(), TEXT_DIALOG_HEIGHT)
         try:
             root_x = master.winfo_rootx()
             root_y = master.winfo_rooty()

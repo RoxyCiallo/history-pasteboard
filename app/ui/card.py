@@ -110,6 +110,7 @@ class ClipCard(tk.Canvas):
     :param width: 卡片像素宽度（主窗口列表宽度）
     :param unlocked: 二级密码已解锁时，私密卡显示正文而不是打码
     :param on_copy/on_pin/on_delete/on_unlock: 卡片动作回调，参数为 ``item``
+    :param on_view: 「查看全文」回调；只对超过 3 行的文字卡显示入口
     """
 
     def __init__(
@@ -124,6 +125,7 @@ class ClipCard(tk.Canvas):
         on_pin,
         on_delete,
         on_unlock,
+        on_view=None,
         unlocked: bool = False,
     ) -> None:
         super().__init__(
@@ -140,6 +142,8 @@ class ClipCard(tk.Canvas):
         self._on_pin = on_pin
         self._on_delete = on_delete
         self._on_unlock = on_unlock
+        self._on_view = on_view
+        self._view_button: tk.Label | None = None
 
         self._kind = item.get("kind", "text")
         self._is_private = bool(item.get("is_private"))
@@ -256,6 +260,22 @@ class ClipCard(tk.Canvas):
             tag.pack(side="left")
             self._tint_widgets.append(tag)
 
+        if self._should_show_view_button():
+            view_button = tk.Label(
+                meta_row,
+                text="查看全文 ›",
+                font=self._fonts.small(),
+                bg=bg,
+                fg=theme.PRIMARY,
+                cursor="hand2",
+            )
+            view_button.pack(side="right")
+            view_button.bind("<Button-1>", self._on_view_click)
+            view_button.bind("<Enter>", lambda _e: view_button.configure(fg=theme.PRIMARY_HOVER))
+            view_button.bind("<Leave>", lambda _e: view_button.configure(fg=theme.PRIMARY))
+            self._view_button = view_button
+            self._tint_widgets.append(view_button)
+
     def _icon_button(self, master, text: str, command, color: str = theme.TEXT_SECONDARY) -> tk.Label:
         """卡片右上角的图标按钮：无边框，悬停加浅底并变色。"""
         label = tk.Label(
@@ -281,6 +301,17 @@ class ClipCard(tk.Canvas):
         if self._kind == "image":
             return "图片"
         return clip_lines(self._raw_text, self._body_font, self._text_width())
+
+    def _should_show_view_button(self) -> bool:
+        """文字被 3 行预览截断、且有「查看全文」回调时才显示入口。"""
+        if self._kind != "text" or self._on_view is None or not self._raw_text:
+            return False
+        if self._is_private and not self._unlocked:
+            return False
+        return self._preview_text().endswith("…")
+
+    def _on_view_click(self, _event=None):
+        self._invoke(self._on_view)
 
     def _meta_text(self) -> str:
         from ui.main_window import format_time, human_size
@@ -321,6 +352,8 @@ class ClipCard(tk.Canvas):
         self.bind("<Enter>", self._on_pointer_enter)
         self.bind("<Leave>", self._on_pointer_leave)
         buttons = {self._pin_button, self._delete_button}
+        if self._view_button is not None:
+            buttons.add(self._view_button)
         for widget in self._descendants(self):
             if widget in buttons:
                 continue

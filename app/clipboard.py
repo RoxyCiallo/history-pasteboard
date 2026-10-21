@@ -13,6 +13,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from pathlib import Path
 
 from PIL import Image, ImageGrab
@@ -170,6 +171,28 @@ class ClipboardListener(threading.Thread):
         self._queue = event_queue
         self._interval = interval
         self._reader = reader
+        # 程序自己写剪贴板（卡片点击复制）时，跳过下一次序号变化，避免回灌历史。
+        self._suppress_lock = threading.Lock()
+        self._suppress_until = 0.0
+
+    def suppress_once(self, seconds: float = 1.0) -> None:
+        """让监听线程忽略下一次剪贴板变化（程序主动写入时调用）。
+
+        调用方应在写剪贴板**之前**调用；若写入失败、序号没有变化，
+        抑制标记会在 ``seconds`` 秒后自动失效，不会误吞用户的下一次复制。
+        """
+        deadline = time.monotonic() + max(0.0, seconds)
+        with self._suppress_lock:
+            self._suppress_until = deadline
+
+    def _consume_suppress(self) -> bool:
+        """消费抑制标记：命中一次就清零，过期视为未命中。"""
+        with self._suppress_lock:
+            if self._suppress_until <= 0.0:
+                return False
+            hit = time.monotonic() < self._suppress_until
+            self._suppress_until = 0.0
+            return hit
 
     def stop(self, timeout: float = 2.0) -> None:
         """请求停止并等待线程收尾，最多等 ``timeout`` 秒。"""
@@ -192,6 +215,9 @@ class ClipboardListener(threading.Thread):
                 if sequence == last:
                     continue
                 last = sequence
+                if self._consume_suppress():
+                    _LOGGER.debug("跳过程序自身写入的剪贴板变化")
+                    continue
                 try:
                     event = capture(self._database, self._data_dir, self._reader)
                 except win32.ClipboardError:

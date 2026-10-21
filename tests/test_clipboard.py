@@ -155,5 +155,39 @@ class CaptureTestCase(unittest.TestCase):
         self.assertEqual(event["kind"], "image")
 
 
+class ListenerSuppressTests(unittest.TestCase):
+    """程序自身写入剪贴板时，监听线程应跳过这一次变化（CB-08）。"""
+
+    def setUp(self):
+        self._tmp = tmpdir.new_dir()
+        self.data_dir = storage.ensure_layout(self._tmp / "data")
+        self.database = db.Database(storage.db_path(self.data_dir))
+        self.listener = clipboard.ClipboardListener(self.database, self.data_dir)
+
+    def tearDown(self):
+        self.listener.stop()
+        self.database.close()
+        tmpdir.remove_dir(self._tmp)
+
+    def test_suppress_consumed_once(self):
+        self.listener.suppress_once()
+        self.assertTrue(self.listener._consume_suppress())
+        self.assertFalse(self.listener._consume_suppress())
+
+    def test_suppress_without_request_returns_false(self):
+        self.assertFalse(self.listener._consume_suppress())
+
+    def test_suppress_expires_after_timeout(self):
+        self.listener.suppress_once(seconds=0.0)
+        self.assertFalse(self.listener._consume_suppress())
+
+    def test_suppress_does_not_swallow_user_copy_after_expiry(self):
+        # 写剪贴板失败时抑制标记会过期，用户的真实复制必须照常记录。
+        self.listener.suppress_once(seconds=0.0)
+        event = clipboard.capture(self.database, self.data_dir, FakeReader(text="用户手动复制"))
+        self.assertIsNotNone(event)
+        self.assertEqual(self.database.count(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
