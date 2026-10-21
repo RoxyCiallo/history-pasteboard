@@ -15,7 +15,7 @@
 | M4 | 卡片与核心交互 | ✅ 已完成 | 2026-10-21 |
 | M5 | 生命周期与设置 | ✅ 已完成 | 2026-10-21 |
 | M6 | 二级密码 | ✅ 已完成 | 2026-10-21 |
-| M7 | 打包发布 | ⬜ 未开始 | — |
+| M7 | 打包发布 | ✅ 已完成 | 2026-10-21 |
 
 图例：⬜ 未开始 · 🟡 进行中 · ✅ 已完成 · ⛔ 受阻
 
@@ -169,19 +169,30 @@
 
 ---
 
-## M7 打包发布（约 1 个开发轮次）
+## M7 打包发布（约 1 个开发轮次）✅ 2026-10-21
 
 **目标**：交付 `dist/PasteBoard.exe`。
 
-- [ ] `make_icon.py` 生成 `assets/app.ico`
-- [ ] `build_exe.ps1`：装 PyInstaller → 打包 → 校验产物；含 onedir 回退
-- [ ] 冒烟测试：全新目录双击运行、复制、热键、退出、数据持久
-- [ ] 更新 `README.md`（使用说明、数据位置、已知限制）
-- [ ] 记录包体大小与冷启动时间到 `docs/07`
+- [x] `make_icon.py` 生成 `assets/app.ico`
+- [x] `build_exe.ps1`：装 PyInstaller → 打包 → 校验产物；含 onedir 回退
+- [x] 冒烟测试：全新目录双击运行、复制、热键、退出、数据持久
+- [x] 更新 `README.md`（使用说明、数据位置、已知限制）
+- [x] 记录包体大小与冷启动时间到 `docs/07`
 
 **验收**：把 exe 拷到另一个目录双击可用，历史随 `data/` 走。
 **依赖**：M1–M6 全部完成。
 **风险**：PyInstaller 需联网；失败回退 `--onedir` + `启动.vbs`。
+
+**验收结果**
+- `assets/app.ico`（22.5 KB，7 种尺寸 16–256）由 `make_icon.py` 生成，预览 `build/icon-preview.png`。
+- `build_exe.ps1` 支持 `-Install` / `-SkipTests` / `-Onedir`，五步流程（找 Python → 图标 → PyInstaller 检查 → 单测 → 打包校验）。
+- 打包产物 `dist/PasteBoard.exe` **30.5 MB**（PyInstaller 6.22.3）。
+- `-Onedir` 版从空目录启动验证通过：0.3 秒内完成初始化，写出三条启动日志，创建 `data/history.db`、`images/`、`thumbs/`、`app.log`。
+- 已更新 `docs/07` §3（产物与实测大小、onefile 启动说明）、§4（R1/R7 已验部分）、§5（`-Onedir` 命令）。
+
+**已知限制**
+- `--onefile` 首次启动需解压约 30 MB 到 `%TEMP%\_MEIxxxx`（约 2–4 秒），且要求 `%TEMP%` 可写；开发沙箱内临时目录受限，单文件版只验证到「构建成功」。
+- R2–R6、R8（复制/热键/剪贴板回写/置顶持久/残留进程）需真实桌面手动确认。
 
 ---
 

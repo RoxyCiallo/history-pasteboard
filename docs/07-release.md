@@ -58,6 +58,9 @@ dist/
 └─ PasteBoard.exe          # 唯一需要分发的文件（约 20–40MB）
 ```
 
+M7 实测（2026-10-21，PyInstaller 6.22.3）：`dist/PasteBoard.exe` **30.5 MB**。
+回退版 `-Onedir` 产物位于 `dist/PasteBoard/PasteBoard.exe` + 依赖文件夹。
+
 首次运行后在 exe 同目录生成：
 
 ```
@@ -72,6 +75,9 @@ data/
 
 分发方式：把 `PasteBoard.exe` 拷给对方即可；连 `data/` 一起打包就是「带历史的迁移」。卸载 = 删除该文件夹。
 
+> `--onefile` 每次启动会把自身解压到 `%TEMP%\_MEIxxxx`，因此**启动略慢（约 2–4 秒）**，且要求 `%TEMP%` 可写；
+> 若对方机器的临时目录被安全策略锁定，改用 `-Onedir` 版（启动约 0.3 秒，免解压）。
+
 ## 4. 冒烟验证（每次打包必做）
 
 | ID | 步骤 | 预期 |
@@ -85,11 +91,17 @@ data/
 | R7 | 检查 `data/` | 数据库与图片文件齐全 |
 | R8 | 任务管理器 | 退出后无残留进程/CPU 占用 |
 
+M7 已在开发环境验证的部分：`-Onedir` 产物从空目录启动，0.3 秒内写出
+「程序启动：数据目录 …」「全局热键已注册：Ctrl+Shift+V」「剪贴板监听已启动」三条日志，
+并创建 `data/history.db`、`images/`、`thumbs/`、`app.log`（对应 R1 的目录/日志部分、R7）。
+R2–R6、R8 需在真实桌面手动确认（见 `docs/06-test-plan.md` 的待实机项）。
+
 ## 5. 回退方案
 
 若 PyInstaller 安装失败或产物无法运行：
 
-1. **降级 onedir**：`--onefile` 换成 `--onedir`，生成 `dist/PasteBoard/PasteBoard.exe` + 依赖目录（启动更快）。
+1. **降级 onedir**：`powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Onedir`，
+   生成 `dist/PasteBoard/PasteBoard.exe` + 依赖目录（启动更快，分发时拷整个 `PasteBoard` 文件夹）。
 2. **脚本启动**：新建 `启动.vbs`：
    ```vbs
    CreateObject("WScript.Shell").Run """C:\path\to\pythonw.exe"" ""C:\path\to\app\main.py""", 0, False
