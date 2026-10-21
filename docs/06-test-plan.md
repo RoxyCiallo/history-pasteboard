@@ -101,6 +101,23 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 
 > 真实剪贴板的读写不走单元测试（依赖桌面会话），用 `tools/clipboard_watch.py` 手动验证。
 
+### 2.5 `tests/test_ui_helpers.py`（M4 新增）
+
+| 编号 | 用例 | 覆盖点 |
+|---|---|---|
+| UI-01 | `RoundedPointsTests.test_four_corners_are_sampled` | 圆角多边形四个角各采样 `steps+1` 个点，坐标不越界 |
+| UI-02 | `test_radius_clamped_to_half_size` | 半径超过短边一半时被夹紧 |
+| UI-03 | `test_zero_radius_is_plain_rectangle` | 半径为 0 退化为直角矩形 |
+| UI-04 | `FormatTimeTests.test_today/yesterday/older` | 时间显示三档：今天、昨天、日期 |
+| UI-05 | `test_invalid_text_returned_as_is` | 非法时间字符串原样返回 |
+| UI-06 | `HumanSizeTests.test_bytes/kilobytes/megabytes/none` | 文件大小格式与 `None` 兜底 |
+| UI-07 | `ClipLinesTests.test_short_text_kept/empty_text` | 短文本与空文本不改动 |
+| UI-08 | `test_hard_line_break_respected` | 文本内的硬换行保留 |
+| UI-09 | `test_long_line_is_wrapped_and_truncated` | 长行按像素宽度断行、末行加省略号 |
+| UI-10 | `test_line_count_limited` | 超过 3 行只保留 3 行 |
+
+> `ClipLinesTests` 需要 Tk 显示；在无桌面环境自动 `SkipTest`。
+
 ## 3. 手动验收清单
 
 前置：`data/` 为空目录，程序首次启动。
@@ -126,12 +143,12 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | A17 | 重新启动 | 历史、置顶、保留期、密码全部保留 |
 | A18 | 把窗口放到 150% 缩放屏幕 | 字不模糊、布局不溢出 |
 
-### 截至 M3 的验收进度（2026-10-21）
+### 截至 M4 的验收进度（2026-10-21）
 
-- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4 部分**（图片卡缩略图与尺寸渲染，`build/ui_probe.py`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）。
-- 待实机验证：**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A12**（单实例，M5）。
-- 尚未实现：**A5–A8**（卡片点击/置顶/删除交互，M4）、**A13**（清理定时器，M5）、**A14–A15**（二级密码，M6）、**A16–A17**（彻底退出与重启保留，M5 补全）。
-- 开发期自检脚本 `build/ui_probe.py`（不入库）：进程内渲染窗口 → 测搜索/无结果/清空 → 测 `hide()`/`show()` → 截图，输出可直接对照本清单。
+- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（点击文字卡片写回剪贴板并隐藏窗口，`_copy_item` 用 mock 验证调用与 `withdraw()`）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）。
+- 待实机验证：**A6**（点击图片卡片写回剪贴板，需要真实粘贴到画图确认）、**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A16**（点「彻底退出」按钮）、**A17**（重启后数据保留）。
+- 尚未实现：**A12**（单实例，M5）、**A13**（清理定时器，M5）、**A14–A15**（二级密码，M6）。
+- 开发期自检脚本 `build/ui_probe.py`（不入库）：进程内渲染窗口 → 测搜索/无结果/清空 → 测置顶重排、复制、删除 → 截图，输出可直接对照本清单。
 
 ## 4. 回归清单（每次改代码必过）
 

@@ -75,6 +75,9 @@ def purge_expired(self, days: int) -> int:
 - 主窗口用 `withdraw()/deiconify()` 隐藏与唤出，不用 `destroy()` 关闭（会丢状态）。
 - 所有 `Toplevel` 设置 `transient(master)` + `grab_set()`，并处理 `WM_DELETE_WINDOW`。
 - Canvas 内嵌 Frame 列表：`<Configure>` 里更新 `scrollregion`，canvas 宽度变化时同步 `itemconfigure(width=...)` 并刷新所有 Label 的 `wraplength`，否则换行宽度不跟随窗口。
+- **`scrollregion` 必须从 `(0, 0)` 起算**：若直接取 `canvas.bbox("all")`（内容左边距 20px），Canvas 会把内容整体左移 20px，卡片贴到窗口边缘（M4 踩过）。
+- **圆角用显式圆弧采样**（`ui.card.rounded_points(..., steps=4)` 生成多段线），`create_polygon(smooth=True)` 的三个控制点只能磨出 1–2px 的钝角，达不到设计稿的 10px 圆角。
+- 卡片是 `Canvas` + 内嵌 `Frame`：参与「悬停换底色」的子控件必须登记到 `_tint_widgets`，否则悬停时会留一块白色方块。
 - 搜索框占位符用 `_placeholder_active` 标志维护，取值前先判断标志，不要把占位文本当关键字去查询。
 
 ## 5.1 线程规则

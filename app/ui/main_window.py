@@ -1,11 +1,14 @@
-"""主窗口（M3 骨架版）：顶栏、卡片列表、状态栏。
+"""主窗口：顶栏、圆角卡片列表、状态栏。
 
-M3 只负责把窗口搭起来、按时间倒序显示历史条目、支持搜索过滤；
-卡片点击复制、置顶、删除等交互在 M4 实现。
+职责：
+- 列表按「置顶优先、时间倒序」渲染，支持关键字搜索与滚动分页；
+- 卡片点击复制回剪贴板并隐藏窗口，支持置顶、删除、私密内容占位提示；
+- 监听线程通过队列投递事件，窗口用 ``after`` 轮询，不跨线程操作控件。
 """
 
 from __future__ import annotations
 
+import logging
 import queue
 import re
 import tkinter as tk
@@ -15,14 +18,16 @@ from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 import storage
-from ui import theme
+import win32
+from ui import card, theme
+
+_LOGGER = logging.getLogger("pasteboard.ui.main_window")
 
 PLACEHOLDER = "搜索历史…"
 POLL_INTERVAL_MS = 200
 REFRESH_DEBOUNCE_MS = 80
 SEARCH_DEBOUNCE_MS = 300
-MAX_PREVIEW_LINES = 3
-MAX_PREVIEW_CHARS = 80
+RESIZE_DEBOUNCE_MS = 120
 
 
 def format_time(iso_text: str, now: datetime | None = None) -> str:
@@ -50,19 +55,6 @@ def human_size(byte_size: int | None) -> str:
     return f"{size / (1024 * 1024):.1f} MB"
 
 
-def clip_text(text: str | None, max_lines: int = MAX_PREVIEW_LINES) -> str:
-    """预览文本：最多 3 行，每行最多 80 字，超出加省略号；保留原有换行。"""
-    raw = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = raw.split("\n")
-    clipped = [
-        line if len(line) <= MAX_PREVIEW_CHARS else line[:MAX_PREVIEW_CHARS] + "…"
-        for line in lines[:max_lines]
-    ]
-    if len(lines) > max_lines and clipped:
-        clipped[-1] = clipped[-1] + "…"
-    return "\n".join(clipped)
-
-
 class MainWindow(tk.Tk):
     """主窗口：顶栏 + 滚动卡片列表 + 状态栏。"""
 
@@ -84,9 +76,11 @@ class MainWindow(tk.Tk):
         self._keyword = ""
         self._search_job = None
         self._refresh_job = None
+        self._resize_job = None
         self._placeholder_active = True
-        self._text_labels: list[tk.Label] = []
-        self._photos: list[ImageTk.PhotoImage] = []
+        self._cards: list[card.ClipCard] = []
+        self._has_more = False
+        self._loading_more = False
         self._thumb_cache: dict[str, ImageTk.PhotoImage] = {}
 
         self._apply_scaling()
@@ -265,22 +259,29 @@ class MainWindow(tk.Tk):
     # ---- 列表渲染 ---------------------------------------------------
 
     def _on_content_configure(self, _event=None) -> None:
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        bbox = self.canvas.bbox("all")
+        if not bbox:
+            return
+        # scrollregion 必须从 (0,0) 开始：若直接用 bbox（左边距 20），
+        # Canvas 会把内容整体左移 20px，卡片看起来贴到了窗口边缘。
+        width = max(bbox[2], self.canvas.winfo_width())
+        self.canvas.configure(scrollregion=(0, 0, width, bbox[3] + 12))
 
     def _on_canvas_configure(self, event) -> None:
-        content_width = max(event.width - 2 * theme.PAD_WINDOW_X - 8, 240)
+        content_width = max(event.width - 2 * theme.PAD_WINDOW_X - 8, card.MIN_CARD_WIDTH)
         self.canvas.itemconfigure(self._window_id, width=content_width)
-        wrap = self._wrap_length(content_width)
-        for label in self._text_labels:
-            try:
-                label.configure(wraplength=wrap)
-            except tk.TclError:
-                pass
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(RESIZE_DEBOUNCE_MS, lambda: self._resize_cards(content_width))
 
-    @staticmethod
-    def _wrap_length(content_width: int) -> int:
-        """卡内文字可用宽度：列表宽 - 卡片内边距 - 左侧图标。"""
-        return max(content_width - 2 * theme.PAD_CARD - 30, 200)
+    def _resize_cards(self, content_width: int) -> None:
+        """窗口宽度变化后统一更新卡片宽度（防抖，避免逐像素重排）。"""
+        self._resize_job = None
+        for clip in self._cards:
+            try:
+                clip.set_width(content_width)
+            except tk.TclError:  # pragma: no cover - 卡片可能已被销毁
+                pass
 
     def _current_content_width(self) -> int:
         width = self.canvas.winfo_width()
@@ -293,9 +294,11 @@ class MainWindow(tk.Tk):
             return
         step = -3 if event.delta > 0 else 3
         self.canvas.yview_scroll(step, "units")
+        # 等这一帧滚动生效后再判断是否到底，避免用上一帧的 yview。
+        self.after(120, self._maybe_load_more)
 
     def refresh(self) -> None:
-        """按当前关键字重新查询并重绘列表。"""
+        """按当前关键字重新查询并重绘列表（第一页）。"""
         if self._closing:
             return
         keyword = self._keyword or None
@@ -304,6 +307,7 @@ class MainWindow(tk.Tk):
         else:
             items = self._database.list_items(limit=theme.LIST_PAGE)
         self._render(items)
+        self._has_more = len(items) >= theme.LIST_PAGE
         total = self._database.count(keyword)
         self.status_label.configure(
             text=f"共 {total} 条 · 保留 {self._retention_days()} 天"
@@ -330,14 +334,29 @@ class MainWindow(tk.Tk):
     def _render(self, items: list[dict]) -> None:
         for child in self.list_frame.winfo_children():
             child.destroy()
-        self._text_labels = []
-        self._photos = []
+        self._cards = []
         if not items:
             self._render_empty()
         else:
-            for item in items:
-                self._render_card(item)
+            self._append_items(items)
         self._on_content_configure()
+
+    def _append_items(self, items: list[dict]) -> None:
+        width = self._current_content_width()
+        for item in items:
+            clip = card.ClipCard(
+                self.list_frame,
+                item,
+                fonts=self._fonts,
+                thumb_loader=self._load_thumbnail,
+                width=width,
+                on_copy=self._copy_item,
+                on_pin=self._toggle_pin,
+                on_delete=self._delete_item,
+                on_unlock=self._unlock_item,
+            )
+            clip.pack(fill="x", pady=(0, theme.GAP_CARD))
+            self._cards.append(clip)
 
     def _render_empty(self) -> None:
         holder = tk.Frame(self.list_frame, bg=theme.BG_ROOT, pady=70)
@@ -355,77 +374,88 @@ class MainWindow(tk.Tk):
             justify="center",
         ).pack()
 
-    def _render_card(self, item: dict) -> None:
-        is_private = bool(item["is_private"])
-        is_pinned = bool(item["pinned"])
-        bg = theme.BG_PRIVATE if is_private else theme.BG_CARD
+    # ---- 分页加载 ---------------------------------------------------
 
-        card = tk.Frame(
-            self.list_frame,
-            bg=bg,
-            highlightthickness=1,
-            highlightbackground=theme.BORDER,
+    def _maybe_load_more(self) -> None:
+        if self._closing or self._loading_more or not self._has_more:
+            return
+        try:
+            _, last = self.canvas.yview()
+        except tk.TclError:  # pragma: no cover
+            return
+        if last >= 0.998:
+            self._load_more()
+
+    def _load_more(self) -> None:
+        self._loading_more = True
+        offset = len(self._cards)
+        try:
+            keyword = self._keyword or None
+            if keyword:
+                items = self._database.search(keyword, limit=theme.LIST_PAGE, offset=offset)
+            else:
+                items = self._database.list_items(limit=theme.LIST_PAGE, offset=offset)
+            if items:
+                self._append_items(items)
+                self._on_content_configure()
+            self._has_more = len(items) >= theme.LIST_PAGE
+        finally:
+            self._loading_more = False
+
+    # ---- 卡片动作 ---------------------------------------------------
+
+    def _copy_item(self, item: dict) -> None:
+        """把卡片内容写回系统剪贴板，然后隐藏窗口，方便直接 Ctrl+V。"""
+        if bool(item.get("is_private")):
+            self._unlock_item(item)
+            return
+        ok = False
+        if item.get("kind") == "text":
+            ok = win32.set_clipboard_text(item.get("text_content") or "")
+        else:
+            path = storage.image_abs_path(self._data_dir, item.get("image_path"))
+            if path is not None and path.exists():
+                try:
+                    with Image.open(path) as source:
+                        ok = win32.set_clipboard_image(source.copy())
+                except (OSError, ValueError):
+                    _LOGGER.exception("读取图片失败，id=%s", item.get("id"))
+        if not ok:
+            self.status_label.configure(text="复制失败：剪贴板被占用，请稍后重试")
+            return
+        _LOGGER.info("已复制回剪贴板，id=%s", item.get("id"))
+        # 复制后的隐藏不弹首次提示，用户正在连用，不需要教学文案。
+        self.withdraw()
+
+    def _toggle_pin(self, item: dict) -> None:
+        self._database.toggle_pin(item.get("id"))
+        self.refresh()
+
+    def _delete_item(self, item: dict) -> None:
+        if not messagebox.askyesno(
+            "删除记录",
+            "删除后无法恢复，确定要删除这条记录吗？\n图片文件会一并删除。",
+            parent=self,
+        ):
+            return
+        deleted = self._database.delete_item(item.get("id"))
+        if deleted:
+            storage.delete_files(
+                self._data_dir,
+                [deleted.get("image_path"), deleted.get("thumb_path")],
+            )
+            for key in (deleted.get("thumb_path"), deleted.get("image_path")):
+                if key:
+                    self._thumb_cache.pop(key, None)
+        self.refresh()
+
+    def _unlock_item(self, item: dict) -> None:
+        # 二级密码在 M6 实现，这里先给出明确提示，避免用户以为点击坏了。
+        messagebox.showinfo(
+            "私密内容",
+            "这条内容带有敏感标记。\n查看与复制需要先设置二级密码，该功能将在后续版本提供。",
+            parent=self,
         )
-        card.pack(fill="x", pady=(0, theme.GAP_CARD))
-        if is_pinned:
-            tk.Frame(card, bg=theme.PRIMARY, width=3).pack(side="left", fill="y")
-
-        inner = tk.Frame(card, bg=bg)
-        inner.pack(side="left", fill="both", expand=True, padx=theme.PAD_CARD, pady=theme.PAD_CARD)
-
-        top = tk.Frame(inner, bg=bg)
-        top.pack(fill="x")
-
-        icon = "🔒" if is_private else ("🖼" if item["kind"] == "image" else "📄")
-        tk.Label(
-            top, text=icon, font=self._fonts.body(), bg=bg, fg=theme.TEXT_PRIMARY
-        ).pack(side="left", anchor="n", padx=(0, 10))
-
-        preview = self._preview_text(item)
-        label = tk.Label(
-            top,
-            text=preview,
-            font=self._fonts.body(),
-            bg=bg,
-            fg=theme.TEXT_PRIMARY,
-            justify="left",
-            anchor="w",
-            wraplength=self._wrap_length(self._current_content_width()),
-        )
-        label.pack(side="left", fill="x", expand=True)
-        self._text_labels.append(label)
-
-        if item["kind"] == "image" and not is_private:
-            photo = self._load_thumbnail(item)
-            if photo is not None:
-                self._photos.append(photo)
-                tk.Label(inner, image=photo, bg=bg, bd=0).pack(
-                    anchor="w", pady=(8, 0)
-                )
-
-        bottom = tk.Frame(inner, bg=bg)
-        bottom.pack(fill="x", pady=(8, 0))
-        meta = self._meta_text(item)
-        tk.Label(
-            bottom, text=meta, font=self._fonts.small(), bg=bg, fg=theme.TEXT_SECONDARY
-        ).pack(side="left")
-
-    def _preview_text(self, item: dict) -> str:
-        if item["is_private"]:
-            return "•••••••••••• 受保护内容，需要密码查看"
-        if item["kind"] == "image":
-            # 尺寸与大小写在底部 meta 行，这里不再重复。
-            return "图片"
-        return clip_text(item["text_content"]) or "（空内容）"
-
-    def _meta_text(self, item: dict) -> str:
-        parts = [format_time(item["updated_at"])]
-        if item["kind"] == "image":
-            parts.append(f"{item['width'] or 0} × {item['height'] or 0}")
-            parts.append(human_size(item["byte_size"]))
-        if item["pinned"]:
-            parts.append("已置顶")
-        return " · ".join(part for part in parts if part)
 
     def _load_thumbnail(self, item: dict) -> "ImageTk.PhotoImage | None":
         relative = item["thumb_path"] or item["image_path"]
