@@ -32,6 +32,7 @@ PRIVATE_MASK = "••••••••••••"
 ICON_TEXT = "📄"
 ICON_IMAGE = "🖼"
 ICON_PRIVATE = "🔒"
+ICON_UNLOCKED = "🔓"
 ICON_PIN = "📌"
 ICON_DELETE = "🗑"
 
@@ -107,6 +108,7 @@ class ClipCard(tk.Canvas):
     :param fonts: ``ui.theme.Fonts`` 实例
     :param thumb_loader: ``callable(item) -> PhotoImage | None``，由主窗口提供缓存
     :param width: 卡片像素宽度（主窗口列表宽度）
+    :param unlocked: 二级密码已解锁时，私密卡显示正文而不是打码
     :param on_copy/on_pin/on_delete/on_unlock: 卡片动作回调，参数为 ``item``
     """
 
@@ -122,6 +124,7 @@ class ClipCard(tk.Canvas):
         on_pin,
         on_delete,
         on_unlock,
+        unlocked: bool = False,
     ) -> None:
         super().__init__(
             master,
@@ -140,6 +143,8 @@ class ClipCard(tk.Canvas):
 
         self._kind = item.get("kind", "text")
         self._is_private = bool(item.get("is_private"))
+        #: 私密且本会话已解锁：显示正文，点击直接复制。
+        self._unlocked = bool(unlocked) and self._is_private
         self._pinned = bool(item.get("pinned"))
         self._raw_text = item.get("text_content") or ""
 
@@ -183,7 +188,10 @@ class ClipCard(tk.Canvas):
         top.pack(fill="x")
         self._tint_widgets.append(top)
 
-        icon = ICON_PRIVATE if self._is_private else (ICON_IMAGE if self._kind == "image" else ICON_TEXT)
+        if self._is_private:
+            icon = ICON_UNLOCKED if self._unlocked else ICON_PRIVATE
+        else:
+            icon = ICON_IMAGE if self._kind == "image" else ICON_TEXT
         tk.Label(top, text=icon, font=self._fonts.body(), bg=bg, fg=theme.TEXT_PRIMARY).pack(
             side="left", anchor="n", padx=(0, 6)
         )
@@ -213,7 +221,7 @@ class ClipCard(tk.Canvas):
         self._text_label.pack(side="left", fill="x", expand=True)
         self._tint_widgets.append(self._text_label)
 
-        if self._kind == "image" and not self._is_private:
+        if self._kind == "image" and (not self._is_private or self._unlocked):
             photo = self._thumb_loader(self.item) if self._thumb_loader else None
             if photo is not None:
                 holder = tk.Frame(self._inner, bg=bg)
@@ -268,7 +276,7 @@ class ClipCard(tk.Canvas):
     # ---- 文本 -------------------------------------------------------
 
     def _preview_text(self) -> str:
-        if self._is_private:
+        if self._is_private and not self._unlocked:
             return f"{PRIVATE_MASK}  受保护内容，点击输入密码查看"
         if self._kind == "image":
             return "图片"
@@ -281,6 +289,8 @@ class ClipCard(tk.Canvas):
         if self._kind == "image":
             parts.append(f"{self.item.get('width') or 0} × {self.item.get('height') or 0}")
             parts.append(human_size(self.item.get("byte_size") or 0))
+        if self._is_private and self._unlocked:
+            parts.append("已解锁")
         return " · ".join(part for part in parts if part)
 
     # ---- 交互 -------------------------------------------------------
@@ -300,7 +310,7 @@ class ClipCard(tk.Canvas):
         return "break"
 
     def _handle_body_click(self, _event=None):
-        if self._is_private:
+        if self._is_private and not self._unlocked:
             self._invoke(self._on_unlock)
         else:
             self._invoke(self._on_copy)

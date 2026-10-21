@@ -32,8 +32,8 @@ app/
    └─ dialogs.py    设置面板（后续补密码对话框）
 ```
 
-> 已落地：`main.py`、`theme.py`、`main_window.py`（M3）、`card.py`（M4）、`dialogs.py`（M5 设置面板）；
-> `security.py` 与密码对话框待 M6。
+> 已落地：`main.py`、`theme.py`、`main_window.py`（M3）、`card.py`（M4）、`dialogs.py`（M5 设置面板 +
+> M6 密码对话框）、`security.py`（M6）。
 
 ### 模块职责与依赖
 
@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 | `pwd_hash` | hex | 空 | PBKDF2-HMAC-SHA256 结果 |
 | `pwd_iterations` | int | 200000 | 便于日后提高 |
 | `pwd_set_at` | iso | 空 | 设置时间 |
+| `pwd_fail_count` | int | 0 | 连续错误次数，达到 5 写入冷却 |
+| `pwd_locked_until` | iso | 空 | 冷却结束时间（错误满 5 次后 30 秒） |
 | `hotkey` | str | `ctrl+shift+v` | 取值见 `win32.HOTKEY_PRESETS` |
 | `hide_hint_shown` | bool | false | 首次隐藏提示是否已显示 |
 | `window_geometry` | str | 空 | `WxH+X+Y` |

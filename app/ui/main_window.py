@@ -31,6 +31,8 @@ RESIZE_DEBOUNCE_MS = 120
 #: 保留期清理：启动后 2 秒跑一次，之后每 10 分钟一次（docs/02 §7）。
 PURGE_INTERVAL_MS = 600_000
 PURGE_START_DELAY_MS = 2_000
+#: 私密内容空闲自动上锁的检查间隔（实际超时由 security.SESSION_IDLE_SECONDS 控制）。
+AUTO_LOCK_CHECK_MS = 30_000
 #: 状态栏临时提示的显示时长。
 STATUS_FLASH_MS = 6_000
 DEFAULT_HOTKEY_LABEL = "Ctrl+Shift+V"
@@ -71,6 +73,7 @@ class MainWindow(tk.Tk):
         data_dir,
         event_queue: "queue.Queue | None" = None,
         on_quit=None,
+        security_guard=None,
     ) -> None:
         super().__init__()
         self._database = database
@@ -78,6 +81,7 @@ class MainWindow(tk.Tk):
         self._data_dir = data_dir
         self._queue = event_queue
         self._on_quit = on_quit
+        self._security = security_guard
         self._closing = False
         self._keyword = ""
         self._search_job = None
@@ -90,10 +94,12 @@ class MainWindow(tk.Tk):
         self._thumb_cache: dict[str, ImageTk.PhotoImage] = {}
         self._purge_job = None
         self._status_job = None
+        self._auto_lock_job = None
         self._base_status = "共 0 条"
         self._status_flash = ""
         self._hotkey_label = DEFAULT_HOTKEY_LABEL
         self._settings_dialog: "dialogs.SettingsDialog | None" = None
+        self._password_dialog: "dialogs.PasswordDialog | None" = None
 
         self._apply_scaling()
         self._fonts = theme.Fonts(self)
@@ -112,6 +118,8 @@ class MainWindow(tk.Tk):
 
         self.refresh()
         self._purge_job = self.after(PURGE_START_DELAY_MS, self._purge_expired)
+        if self._security is not None:
+            self._auto_lock_job = self.after(AUTO_LOCK_CHECK_MS, self._check_auto_lock)
         if self._queue is not None:
             self.after(POLL_INTERVAL_MS, self._poll_events)
 
@@ -354,7 +362,10 @@ class MainWindow(tk.Tk):
         self._render(items)
         self._has_more = len(items) >= theme.LIST_PAGE
         total = self._database.count(keyword)
-        self._set_base_status(f"共 {total} 条 · 保留 {self._retention_days()} 天")
+        status = f"共 {total} 条 · 保留 {self._retention_days()} 天"
+        if self._security is not None and self._security.unlocked:
+            status += " · 私密已解锁"
+        self._set_base_status(status)
 
     def _retention_days(self) -> int:
         if self._config is None:
@@ -417,6 +428,7 @@ class MainWindow(tk.Tk):
 
     def _append_items(self, items: list[dict]) -> None:
         width = self._current_content_width()
+        unlocked = bool(self._security is not None and self._security.unlocked)
         for item in items:
             clip = card.ClipCard(
                 self.list_frame,
@@ -428,6 +440,7 @@ class MainWindow(tk.Tk):
                 on_pin=self._toggle_pin,
                 on_delete=self._delete_item,
                 on_unlock=self._unlock_item,
+                unlocked=unlocked,
             )
             clip.pack(fill="x", pady=(0, theme.GAP_CARD))
             self._cards.append(clip)
@@ -480,7 +493,8 @@ class MainWindow(tk.Tk):
 
     def _copy_item(self, item: dict) -> None:
         """把卡片内容写回系统剪贴板，然后隐藏窗口，方便直接 Ctrl+V。"""
-        if bool(item.get("is_private")):
+        unlocked = self._security is not None and self._security.unlocked
+        if bool(item.get("is_private")) and not unlocked:
             self._unlock_item(item)
             return
         ok = False
@@ -498,6 +512,8 @@ class MainWindow(tk.Tk):
             self._flash_status("复制失败：剪贴板被占用，请稍后重试")
             return
         _LOGGER.info("已复制回剪贴板，id=%s", item.get("id"))
+        if self._security is not None:
+            self._security.touch()
         # 复制后的隐藏不弹首次提示，用户正在连用，不需要教学文案。
         self.withdraw()
 
@@ -524,12 +540,126 @@ class MainWindow(tk.Tk):
         self.refresh()
 
     def _unlock_item(self, item: dict) -> None:
-        # 二级密码在 M6 实现，这里先给出明确提示，避免用户以为点击坏了。
-        messagebox.showinfo(
-            "私密内容",
-            "这条内容带有敏感标记。\n查看与复制需要先设置二级密码，该功能将在后续版本提供。",
-            parent=self,
+        """私密卡片被点击：已解锁直接复制，否则先设置/输入二级密码。"""
+        guard = self._security
+        if guard is None:
+            messagebox.showinfo(
+                "私密内容",
+                "当前没有可用的密码存储。\n请检查数据目录是否可写。",
+                parent=self,
+            )
+            return
+        if guard.lock_if_idle():
+            self._flash_status("私密内容已自动上锁，请重新输入密码")
+        if guard.unlocked:
+            self._copy_item(item)
+            return
+        if not guard.is_password_set():
+            self._prompt_set_password(item)
+            return
+        self._prompt_unlock(item)
+
+    def _prompt_set_password(self, item: dict) -> None:
+        """首次使用私密内容时设置密码，成功后立即解锁并复制该条。"""
+        guard = self._security
+        if guard is None or self._password_dialog_open():
+            return
+
+        def submit(password: str) -> str | None:
+            try:
+                guard.set_password(password)
+            except ValueError as exc:
+                return str(exc)
+            guard.verify(password)
+            self.refresh()
+            self._flash_status("二级密码已设置，私密内容已解锁，5 分钟内有效")
+            self._copy_item(item)
+            return None
+
+        self._open_password_dialog(
+            mode="set",
+            on_submit=submit,
+            hint="密码只保护界面上的查看与复制，数据库文件本身未加密。",
         )
+
+    def _prompt_unlock(self, item: dict) -> None:
+        """已设置密码但当前锁定时，弹出输入框。"""
+        guard = self._security
+        if guard is None or self._password_dialog_open():
+            return
+
+        def submit(password: str) -> str | None:
+            if guard.verify(password):
+                self.refresh()
+                self._flash_status("私密内容已解锁，5 分钟内有效")
+                self._copy_item(item)
+                return None
+            locked = guard.remaining_lock_seconds()
+            if locked > 0:
+                return f"密码错误次数过多，请 {locked} 秒后再试"
+            remaining = guard.remaining_attempts()
+            if remaining > 0:
+                return f"密码错误，还可尝试 {remaining} 次"
+            return "密码错误"
+
+        self._open_password_dialog(mode="unlock", on_submit=submit)
+
+    def _password_dialog_open(self) -> bool:
+        existing = self._password_dialog
+        if existing is None:
+            return False
+        try:
+            if existing.winfo_exists():
+                existing.lift()
+                existing.focus_set()
+                return True
+        except tk.TclError:
+            pass
+        self._password_dialog = None
+        return False
+
+    def _open_password_dialog(self, *, mode: str, on_submit, hint: str = "") -> None:
+        dialog = dialogs.PasswordDialog(
+            self,
+            self._fonts,
+            mode=mode,
+            on_submit=on_submit,
+            hint=hint,
+        )
+        self._password_dialog = dialog
+
+    def _check_auto_lock(self) -> None:
+        """定期检查私密内容是否空闲超时；上锁后让卡片回到打码状态。"""
+        self._auto_lock_job = None
+        if self._closing:
+            return
+        guard = self._security
+        if guard is not None and guard.lock_if_idle():
+            self.refresh()
+            self._flash_status("私密内容已自动上锁")
+        if guard is not None:
+            self._auto_lock_job = self.after(AUTO_LOCK_CHECK_MS, self._check_auto_lock)
+
+    def _reset_password(self) -> int:
+        """重置二级密码：清空密码设置并删除全部私密记录，返回删除条数。"""
+        guard = self._security
+        if guard is None:
+            return 0
+        guard.reset_password()
+        records = self._database.delete_private_items()
+        paths: list[str | None] = []
+        for record in records:
+            paths.append(record.get("image_path"))
+            paths.append(record.get("thumb_path"))
+        if paths:
+            storage.delete_files(self._data_dir, paths)
+            for relative in paths:
+                if relative:
+                    self._thumb_cache.pop(relative, None)
+        self.refresh()
+        _LOGGER.info("已重置二级密码，删除 %s 条私密记录", len(records))
+        self._flash_status(f"二级密码已重置，删除 {len(records)} 条私密记录")
+        return len(records)
 
     def _load_thumbnail(self, item: dict) -> "ImageTk.PhotoImage | None":
         relative = item["thumb_path"] or item["image_path"]
@@ -633,6 +763,10 @@ class MainWindow(tk.Tk):
                     "窗口已隐藏，复制的内容仍会继续记录。\n按 Ctrl+Shift+V 可以再次打开。",
                     parent=self,
                 )
+        # 窗口隐藏即上锁，避免别人打开窗口时私密内容仍是明文（docs/02 §9）。
+        if self._security is not None and self._security.unlocked:
+            self._security.lock()
+            self.refresh()
         self.withdraw()
 
     def show(self) -> None:
@@ -667,6 +801,8 @@ class MainWindow(tk.Tk):
             self._data_dir,
             on_clear=self._clear_history,
             on_saved=self.refresh,
+            on_reset_password=self._reset_password,
+            password_set=bool(self._security is not None and self._security.is_password_set()),
             hotkey_label=self._hotkey_label,
         )
         self._settings_dialog = dialog

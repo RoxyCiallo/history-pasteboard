@@ -66,18 +66,26 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 
 所有涉及 SQLite 或文件系统的用例继承 `tests/tmpdir.py` 的 `new_dir()` / `remove_dir()`；禁止 `tempfile.TemporaryDirectory`（沙箱 ACL 问题，见 `docs/02` 第 6 节）。
 
-### 2.3 `tests/test_security.py`
+### 2.3 `tests/test_security.py`（M6 已实现）
 
-| ID | 场景 | 预期 |
+| 编号 | 用例 | 覆盖点 |
 |---|---|---|
-| SE-01 | 设置密码 | `pwd_hash` 不为空，且不等于明文 |
-| SE-02 | 两次设置相同密码 | 盐不同 → 哈希不同 |
-| SE-03 | 正确密码 | 校验通过 |
-| SE-04 | 错误密码 | 返回 False，attempts+1 |
-| SE-05 | 连续 5 次错误 | 进入 30s 冷却，冷却内直接拒绝 |
-| SE-06 | 冷却结束 | 可再次尝试 |
-| SE-07 | 重置密码 | 私密卡片被删除，`pwd_*` 清空 |
-| SE-08 | 超时上锁 | 超过 5 分钟空闲后 `is_unlocked()` 为 False |
+| SE-01 | `test_no_password_means_locked` | 未设置密码时不可解锁 |
+| SE-02 | `test_set_password_stores_salt_and_hash` | 盐 32 hex、哈希 64 hex 且不等于明文 |
+| SE-03 | `test_salt_is_random` | 两次设置相同密码，盐与哈希都不同 |
+| SE-04 | `test_rejects_short_password` / `test_rejects_blank_password` | 少于 4 位、全空白被拒绝 |
+| SE-05 | `test_correct_password_unlocks` | 正确密码解锁 |
+| SE-06 | `test_wrong_password_stays_locked` | 错误密码不解锁且失败计数 +1 |
+| SE-07 | `test_five_failures_lock_temporarily` | 连续 5 次失败锁 30 秒，冷却内正确密码也拒绝 |
+| SE-08 | `test_lock_expires_after_cooldown` | 冷却到期后可再次尝试 |
+| SE-09 | `test_success_resets_failure_counter` | 成功一次清零失败计数 |
+| SE-10 | `test_lock_clears_unlocked` | `lock()` 清掉会话解锁状态 |
+| SE-11 | `test_touch_extends_session` | `touch()` 延长空闲计时 |
+| SE-12 | `test_idle_session_locks` | 空闲超过 5 分钟 `lock_if_idle()` 自动上锁 |
+| SE-13 | `test_lock_if_idle_is_noop_when_locked` | 本来就锁着时返回 False |
+| SE-14 | `test_reset_clears_password` | 重置清空 `pwd_*` 并上锁 |
+| SE-15 | `test_delete_private_items` | 只删私密记录，普通记录保留 |
+| SE-16 | `test_delete_private_items_when_none` | 无私密记录时返回空列表 |
 
 ### 2.4 `tests/test_clipboard.py`
 
@@ -171,13 +179,12 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | A17 | 重新启动 | 历史、置顶、保留期、密码全部保留 |
 | A18 | 把窗口放到 150% 缩放屏幕 | 字不模糊、布局不溢出 |
 
-### 截至 M5 的验收进度（2026-10-21）
+### 截至 M6 的验收进度（2026-10-21）
 
-- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（点击文字卡片写回剪贴板并隐藏窗口，`_copy_item` 用 mock 验证调用与 `withdraw()`）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A12**（首个实例隐藏窗口后再次启动，第二个进程 exit 0 并唤回首个窗口）、**A13**（`build/purge_probe.py`：过期非置顶记录与图片文件被删、置顶过期保留、`last_purge_at` 写入）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）。
-- 设置面板（A12/A13 的配套）由 `build/settings_probe.py` 验证：预设与自定义保留期写入、非法值拦截、清空历史连带删图片。
-- 待实机验证：**A6**（点击图片卡片写回剪贴板，需要真实粘贴到画图确认）、**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A16**（点「彻底退出」按钮）、**A17**（重启后数据保留）。
-- 尚未实现：**A14–A15**（二级密码，M6）。
-- 开发期自检脚本（均不入库）：`build/ui_probe.py`（窗口渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）。
+- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（点击文字卡片写回剪贴板并隐藏窗口，`_copy_item` 用 mock 验证调用与 `withdraw()`）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A12**（首个实例隐藏窗口后再次启动，第二个进程 exit 0 并唤回首个窗口）、**A13**（`build/purge_probe.py`：过期非置顶记录与图片文件被删、置顶过期保留、`last_purge_at` 写入）、**A14 / A15**（`build/security_probe.py`：私密卡打码 → 首次点击设置密码 → 解锁后显示明文与缩略图 → 错误密码提示剩余次数 → 连续失败进入冷却）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）。
+- 设置面板（A12/A13 的配套）由 `build/settings_probe.py` 验证：预设与自定义保留期写入、非法值拦截、清空历史连带删图片；M6 新增 `build/m6_settings_probe.py` 验证「重置密码」：密码清除、私密记录与图片文件一并删除、按钮转禁用。
+- 待实机验证：**A6**（点击图片卡片写回剪贴板，需要真实粘贴到画图确认）、**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A16**（点「彻底退出」按钮）、**A17**（重启后数据保留；`security_probe` 已用重建 `Config/Security` 间接验证密码持久化）。
+- 开发期自检脚本（均不入库）：`build/ui_probe.py`（窗口渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）、`build/security_probe.py`（二级密码全流程）、`build/m6_settings_probe.py`（设置面板里的重置密码）。
 
 ## 4. 回归清单（每次改代码必过）
 

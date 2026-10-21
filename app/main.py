@@ -22,6 +22,7 @@ from pathlib import Path
 import clipboard
 import config
 import db
+import security
 import storage
 import win32
 from ui.main_window import MainWindow
@@ -112,6 +113,7 @@ def main() -> int:
     try:
         database = db.Database(storage.db_path(data_dir))
         cfg = config.Config(database)
+        security_guard = security.Security(cfg)
 
         watcher = win32.ActivateWatcher(instance, events)
         watcher.start()
@@ -122,7 +124,7 @@ def main() -> int:
         hotkey = win32.HotkeyThread(events)
         hotkey.start()
 
-        window = MainWindow(database, cfg, data_dir, events)
+        window = MainWindow(database, cfg, data_dir, events, security_guard=security_guard)
         window.mainloop()
         return 0
     except Exception:  # noqa: BLE001 - 启动失败要留下日志而不是闪退

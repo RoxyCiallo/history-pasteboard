@@ -28,6 +28,9 @@ MAX_RETENTION_DAYS = 365
 # 密码迭代次数默认值（见 docs/02 §9）
 DEFAULT_PBKDF2_ITERATIONS = 200_000
 
+# 密码连续失败次数上限（security.MAX_ATTEMPTS 引用此值，避免两处漂移）
+MAX_PASSWORD_ATTEMPTS = 5
+
 
 @dataclass(frozen=True)
 class SettingSpec:
@@ -46,6 +49,8 @@ SPECS: dict[str, SettingSpec] = {
     "pwd_hash": SettingSpec("", "str"),
     "pwd_iterations": SettingSpec(DEFAULT_PBKDF2_ITERATIONS, "int", 10_000, 10_000_000),
     "pwd_set_at": SettingSpec("", "str"),
+    "pwd_fail_count": SettingSpec(0, "int", 0, MAX_PASSWORD_ATTEMPTS),
+    "pwd_locked_until": SettingSpec("", "str"),
     "hotkey": SettingSpec("ctrl+shift+v", "str"),
     "hide_hint_shown": SettingSpec(False, "bool"),
     "window_geometry": SettingSpec("", "str"),

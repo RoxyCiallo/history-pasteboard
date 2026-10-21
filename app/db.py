@@ -217,6 +217,14 @@ class Database:
             self._conn.execute("DELETE FROM items")
             return [_row_to_dict(row) for row in rows]
 
+    def delete_private_items(self) -> list[dict[str, Any]]:
+        """删除所有私密记录（重置密码时使用），返回被删数据列表。"""
+        with self._lock, self._conn:
+            rows = self._conn.execute("SELECT * FROM items WHERE is_private = 1").fetchall()
+            if rows:
+                self._conn.execute("DELETE FROM items WHERE is_private = 1")
+            return [_row_to_dict(row) for row in rows]
+
     def purge_expired(self, retention_days: int, now: _dt.datetime | None = None) -> list[dict[str, Any]]:
         """删除超过保留期的非置顶记录，返回被删数据列表。"""
         if retention_days < 1:

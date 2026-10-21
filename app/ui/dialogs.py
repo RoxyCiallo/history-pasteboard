@@ -1,7 +1,7 @@
-"""设置面板。
+"""设置面板与二级密码对话框。
 
-只做界面与交互，数据写入交给 ``config``，清空历史通过回调交回主窗口执行，
-避免界面层直接操作数据库。
+只做界面与交互，数据写入交给 ``config``；清空历史、重置密码等动作通过回调
+交回主窗口执行，避免界面层直接操作数据库。
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from tkinter import messagebox
 from typing import Callable
 
 import config
+import security
 from ui import theme
 
 _LOGGER = logging.getLogger("pasteboard.ui.dialogs")
@@ -22,6 +23,8 @@ CUSTOM = "custom"
 
 DIALOG_WIDTH = 560
 DIALOG_PAD = 20
+
+PASSWORD_DIALOG_WIDTH = 380
 
 
 class SettingsDialog(tk.Toplevel):
@@ -35,6 +38,8 @@ class SettingsDialog(tk.Toplevel):
         data_dir,
         on_clear: Callable[[], int] | None = None,
         on_saved: Callable[[], None] | None = None,
+        on_reset_password: Callable[[], int] | None = None,
+        password_set: bool = False,
         hotkey_label: str = "Ctrl+Shift+V",
     ) -> None:
         super().__init__(master)
@@ -43,6 +48,8 @@ class SettingsDialog(tk.Toplevel):
         self._data_dir = data_dir
         self._on_clear = on_clear
         self._on_saved = on_saved
+        self._on_reset_password = on_reset_password
+        self._password_set = bool(password_set)
         self._hotkey_label = hotkey_label or "Ctrl+Shift+V"
 
         current = int(cfg.retention_days)
@@ -215,6 +222,41 @@ class SettingsDialog(tk.Toplevel):
 
         self._separator(body)
 
+        # 二级密码
+        password_row = tk.Frame(body, bg=theme.BG_ROOT)
+        password_row.pack(fill="x")
+        tk.Label(
+            password_row,
+            text="二级密码",
+            font=self._fonts.body(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_SECONDARY,
+            width=8,
+            anchor="w",
+        ).pack(side="left")
+        tk.Label(
+            password_row,
+            text="已设置" if self._password_set else "未设置",
+            font=self._fonts.body_bold(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_PRIMARY if self._password_set else theme.TEXT_SECONDARY,
+            anchor="w",
+        ).pack(side="left")
+        self._reset_button = self._action_button(
+            password_row,
+            "重置密码",
+            self._reset_password,
+            bg=theme.BG_CARD,
+            fg=theme.DANGER if self._password_set else theme.TEXT_SECONDARY,
+            hover=theme.PRIMARY_LIGHT,
+            border=True,
+        )
+        self._reset_button.configure(
+            state="normal" if self._password_set else "disabled",
+            cursor="hand2" if self._password_set else "",
+        )
+        self._reset_button.pack(side="right")
+
         # 清空历史
         self._action_button(
             body,
@@ -375,6 +417,30 @@ class SettingsDialog(tk.Toplevel):
             return
         messagebox.showinfo("已清空", f"已删除 {count} 条记录。", parent=self)
 
+    def _reset_password(self) -> None:
+        if self._on_reset_password is None:
+            return
+        if not messagebox.askyesno(
+            "重置二级密码",
+            "重置密码会同时删除所有私密记录，且无法恢复。\n确定要继续吗？",
+            icon="warning",
+            parent=self,
+        ):
+            return
+        try:
+            count = int(self._on_reset_password())
+        except Exception as exc:
+            _LOGGER.exception("重置密码失败")
+            messagebox.showerror("重置失败", f"重置密码时出错：\n{exc}", parent=self)
+            return
+        self._password_set = False
+        self._reset_button.configure(state="disabled", fg=theme.TEXT_SECONDARY, cursor="")
+        messagebox.showinfo(
+            "已重置",
+            f"二级密码已清除，同时删除了 {count} 条私密记录。",
+            parent=self,
+        )
+
     def _open_data_dir(self) -> None:
         try:
             os.startfile(str(self._data_dir))  # noqa: S606 - Windows 专用，打开资源管理器
@@ -391,6 +457,251 @@ class SettingsDialog(tk.Toplevel):
     def _place_on_parent(self, master: tk.Misc) -> None:
         self.update_idletasks()
         width = max(self.winfo_reqwidth(), DIALOG_WIDTH)
+        height = self.winfo_reqheight()
+        try:
+            root_x = master.winfo_rootx()
+            root_y = master.winfo_rooty()
+            root_w = master.winfo_width()
+            root_h = master.winfo_height()
+        except tk.TclError:
+            root_x = root_y = 0
+            root_w = root_h = 0
+        x = root_x + max((root_w - width) // 2, 0)
+        y = root_y + max((root_h - height) // 3, 0)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+
+class PasswordDialog(tk.Toplevel):
+    """二级密码对话框。
+
+    ``mode="set"`` 让用户设置密码（两次输入），``mode="unlock"`` 输入密码解锁。
+    校验与状态变更通过 ``on_submit(password)`` 交回主窗口：返回 ``None`` 表示
+    成功并关闭对话框，返回字符串则作为错误提示显示。
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        fonts: theme.Fonts,
+        *,
+        mode: str = "unlock",
+        on_submit: Callable[[str], str | None],
+        hint: str = "",
+    ) -> None:
+        super().__init__(master)
+        self._fonts = fonts
+        self._mode = "set" if mode == "set" else "unlock"
+        self._on_submit = on_submit
+        self._hint = hint
+        self._password_var = tk.StringVar(self)
+        self._confirm_var = tk.StringVar(self)
+        self._confirm_entry: tk.Entry | None = None
+
+        self.title("设置二级密码" if self._mode == "set" else "输入二级密码")
+        self.configure(bg=theme.BG_ROOT)
+        self.resizable(False, False)
+        self.transient(master)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        self._build()
+        self._place_centered(master)
+        self.grab_set()
+        self.bind("<Escape>", lambda _event: self.destroy())
+        self.bind("<Return>", lambda _event: self._submit())
+        self.after(30, self._focus_first)
+
+    # ---- 界面 -------------------------------------------------------
+
+    def _build(self) -> None:
+        body = tk.Frame(self, bg=theme.BG_ROOT, padx=DIALOG_PAD, pady=DIALOG_PAD)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(
+            body,
+            text=self.title(),
+            font=self._fonts.title(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_PRIMARY,
+            anchor="w",
+        ).pack(fill="x")
+
+        if self._mode == "set":
+            description = f"首次使用私密内容，请设置一个密码（至少 {security.MIN_PASSWORD_LENGTH} 位）。"
+        else:
+            description = "私密内容需要密码才能查看与复制。"
+        tk.Label(
+            body,
+            text=description,
+            font=self._fonts.small(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_SECONDARY,
+            anchor="w",
+            justify="left",
+            wraplength=PASSWORD_DIALOG_WIDTH - 2 * DIALOG_PAD,
+        ).pack(fill="x", pady=(6, 0))
+        if self._hint:
+            tk.Label(
+                body,
+                text=self._hint,
+                font=self._fonts.small(),
+                bg=theme.BG_ROOT,
+                fg=theme.TEXT_SECONDARY,
+                anchor="w",
+                justify="left",
+                wraplength=PASSWORD_DIALOG_WIDTH - 2 * DIALOG_PAD,
+            ).pack(fill="x", pady=(4, 0))
+
+        tk.Label(
+            body,
+            text="密码",
+            font=self._fonts.body(),
+            bg=theme.BG_ROOT,
+            fg=theme.TEXT_SECONDARY,
+            anchor="w",
+        ).pack(fill="x", pady=(12, 4))
+        self._password_entry = self._password_entry_widget(body, self._password_var)
+        self._password_entry.pack(fill="x", ipady=4)
+
+        if self._mode == "set":
+            tk.Label(
+                body,
+                text="确认密码",
+                font=self._fonts.body(),
+                bg=theme.BG_ROOT,
+                fg=theme.TEXT_SECONDARY,
+                anchor="w",
+            ).pack(fill="x", pady=(10, 4))
+            self._confirm_entry = self._password_entry_widget(body, self._confirm_var)
+            self._confirm_entry.pack(fill="x", ipady=4)
+
+        self._error_label = tk.Label(
+            body,
+            text="",
+            font=self._fonts.small(),
+            bg=theme.BG_ROOT,
+            fg=theme.DANGER,
+            anchor="w",
+            justify="left",
+            wraplength=PASSWORD_DIALOG_WIDTH - 2 * DIALOG_PAD,
+        )
+        self._error_label.pack(fill="x", pady=(8, 0))
+
+        footer = tk.Frame(body, bg=theme.BG_ROOT)
+        footer.pack(fill="x", pady=(DIALOG_PAD, 0))
+        self._button(
+            footer,
+            "解锁" if self._mode == "unlock" else "保存",
+            self._submit,
+            bg=theme.PRIMARY,
+            fg=theme.TEXT_ON_PRIMARY,
+            hover=theme.PRIMARY_HOVER,
+        ).pack(side="right")
+        self._button(
+            footer,
+            "取消",
+            self.destroy,
+            bg=theme.BG_CARD,
+            fg=theme.TEXT_PRIMARY,
+            hover=theme.PRIMARY_LIGHT,
+            border=True,
+        ).pack(side="right", padx=(0, 8))
+
+    def _password_entry_widget(self, parent: tk.Misc, variable: tk.StringVar) -> tk.Entry:
+        return tk.Entry(
+            parent,
+            textvariable=variable,
+            show="*",
+            font=self._fonts.body(),
+            bg=theme.BG_INPUT,
+            fg=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
+            highlightcolor=theme.BORDER_FOCUS,
+        )
+
+    def _button(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command,
+        *,
+        bg: str,
+        fg: str,
+        hover: str,
+        border: bool = False,
+    ) -> tk.Button:
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=self._fonts.body(),
+            bg=bg,
+            fg=fg,
+            activebackground=hover,
+            activeforeground=fg,
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=5,
+            cursor="hand2",
+        )
+        if border:
+            button.configure(
+                highlightthickness=1,
+                highlightbackground=theme.BORDER,
+                highlightcolor=theme.BORDER_FOCUS,
+            )
+        return button
+
+    # ---- 交互 -------------------------------------------------------
+
+    def _focus_first(self) -> None:
+        try:
+            self._password_entry.focus_set()
+        except tk.TclError:
+            pass
+
+    def _show_error(self, text: str) -> None:
+        try:
+            self._error_label.configure(text=text)
+        except tk.TclError:
+            pass
+
+    def _submit(self) -> None:
+        password = self._password_var.get()
+        if not password:
+            self._show_error("请输入密码")
+            return
+        if self._mode == "set":
+            if len(password) < security.MIN_PASSWORD_LENGTH:
+                self._show_error(f"密码至少需要 {security.MIN_PASSWORD_LENGTH} 位")
+                return
+            if password != self._confirm_var.get():
+                self._show_error("两次输入的密码不一致")
+                return
+        try:
+            error = self._on_submit(password)
+        except Exception as exc:  # 回调异常不能让对话框无声消失
+            _LOGGER.exception("密码提交失败")
+            self._show_error(f"操作失败：{exc}")
+            return
+        if error:
+            self._show_error(str(error))
+            self._password_var.set("")
+            if self._confirm_entry is not None:
+                self._confirm_var.set("")
+                self._confirm_entry.focus_set()
+            self._password_entry.focus_set()
+            return
+        self.destroy()
+
+    # ---- 定位 -------------------------------------------------------
+
+    def _place_centered(self, master: tk.Misc) -> None:
+        self.update_idletasks()
+        width = max(self.winfo_reqwidth(), PASSWORD_DIALOG_WIDTH)
         height = self.winfo_reqheight()
         try:
             root_x = master.winfo_rootx()
