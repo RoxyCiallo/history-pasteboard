@@ -48,6 +48,24 @@ python -m unittest discover -s tests -v
 | ST-04 | 删除文件 | 不存在时也不抛异常 |
 | ST-05 | 目录不可写 | 回退到备用目录（用假路径模拟） |
 
+M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上限、`image_abs_path` 路径穿越、`PASTEBOARD_DATA_DIR` 覆盖优先、`ensure_layout` 建目录、`db_path`/`log_path` 拼接。
+
+### 2.2.1 `tests/test_config.py`（M1 新增）
+
+| ID | 场景 | 预期 |
+|---|---|---|
+| CF-01 | 空库读默认值 | `retention_days=3`，布尔/字符串取默认 |
+| CF-02 | 写入后读回 | 类型还原（int/bool/str） |
+| CF-03 | 越界天数 | `ValueError`（0、366） |
+| CF-04 | 非数字/非布尔文本 | `ValueError` |
+| CF-05 | 未知键 | `KeyError` |
+| CF-06 | 库里存了脏数据 | `get` 回退默认值，不抛异常 |
+| CF-07 | `retention_days` 属性 | 可读可写，与 `set/get` 等价 |
+
+### 2.2.2 临时目录约定
+
+所有涉及 SQLite 或文件系统的用例继承 `tests/tmpdir.py` 的 `new_dir()` / `remove_dir()`；禁止 `tempfile.TemporaryDirectory`（沙箱 ACL 问题，见 `docs/02` 第 6 节）。
+
 ### 2.3 `tests/test_security.py`
 
 | ID | 场景 | 预期 |

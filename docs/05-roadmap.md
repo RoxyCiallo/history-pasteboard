@@ -9,7 +9,7 @@
 | 里程碑 | 名称 | 状态 | 完成日期 |
 |---|---|---|---|
 | M0 | 工程底座（文档 + 日志体系） | ✅ 已完成 | 2026-10-21 |
-| M1 | 数据层 | ⬜ 未开始 | — |
+| M1 | 数据层 | ✅ 已完成 | 2026-10-21 |
 | M2 | 系统能力层（Win32 + 剪贴板监听） | ⬜ 未开始 | — |
 | M3 | 界面骨架 | ⬜ 未开始 | — |
 | M4 | 卡片与核心交互 | ⬜ 未开始 | — |
@@ -35,21 +35,21 @@
 
 ---
 
-## M1 数据层（约 2 个开发轮次）
+## M1 数据层 ✅（2026-10-21）
 
 **目标**：不打开界面也能把记录正确存下、查出来、清理掉。
 
-- [ ] `app/config.py`：settings 读写 + 默认值 + 类型校验（retention_days 1–365）
-- [ ] `app/storage.py`：数据目录解析（exe 同目录 → LOCALAPPDATA 回退）、图片保存、缩略图生成、sha256、文件删除
-- [ ] `app/db.py`：建表 + schema 版本；`upsert_item` / `list_items` / `search` / `toggle_pin` / `delete_item` / `purge_expired` / `count`
-- [ ] `tests/test_db.py`：去重更新时间、置顶排序、搜索转义、删除连带文件、清理豁免置顶、分页
-- [ ] `tests/test_storage.py`：临时目录保存/删除/回退逻辑
-- [ ] 临时脚本 `tools/dev_smoke.py`：插入 20 条假数据并打印列表，肉眼确认
+- [x] `app/config.py`：settings 读写 + 默认值 + 类型校验（retention_days 1–365）
+- [x] `app/storage.py`：数据目录解析（exe 同目录 → LOCALAPPDATA 回退）、图片保存、缩略图生成、sha256、文件删除
+- [x] `app/db.py`：建表 + schema 版本；`upsert_item` / `list_items` / `search` / `toggle_pin` / `delete_item` / `purge_expired` / `count`
+- [x] `tests/test_db.py`：去重更新时间、置顶排序、搜索转义、删除连带文件、清理豁免置顶、分页
+- [x] `tests/test_storage.py`：临时目录保存/删除/回退逻辑
+- [x] `tests/test_config.py`：默认值、类型校验、脏数据回退（计划外补充）
+- [x] 临时脚本 `tools/dev_smoke.py`：插入 20 条假数据并打印列表，肉眼确认
 
-**交付物**：可被 M2/M3 直接调用的三个模块 + 全绿测试。
-**验收**：`python -m unittest discover -s tests -v` 全绿；`tools/dev_smoke.py` 输出正确的降序列表。
-**依赖**：无。
-**风险**：时间格式与排序（统一 ISO8601 字符串）；图片路径用相对路径，搬家后仍可读。
+**交付物**：可被 M2/M3 直接调用的三个模块 + 全绿测试（48 个用例）。
+**验收结果**：`python -m unittest discover -s tests -v` → `Ran 48 tests ... OK`；`tools/dev_smoke.py` 输出置顶在前、其余按时间降序，搜索与通配符转义正确。
+**备注**：测试临时目录不用 `tempfile.TemporaryDirectory`（它在 Windows 沙箱下会建出不可访问的目录），统一走 `tests/tmpdir.py`。
 
 ---
 

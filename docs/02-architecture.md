@@ -151,10 +151,13 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 ## 6. 数据目录解析（storage.py）
 
 优先级：
+0. 环境变量 `PASTEBOARD_DATA_DIR` —— 测试与冒烟脚本用，指定后**完全不碰**真实数据目录。
 1. `exe 同目录/data/` —— 若存在或可创建（绿色便携）。
 2. `%LOCALAPPDATA%\PasteBoard\data\` —— 上面不可写（如放在 Program Files）时回退。
 
 判定方法：尝试 `os.makedirs(..., exist_ok=True)` + 写入探针文件 `os.access`/实际写一个临时文件，失败则回退。结果写入日志，便于排查。
+
+> 测试约定：单元测试**不要**用 `tempfile.TemporaryDirectory`。它在 Windows 沙箱下会把目录 ACL 改成当前受限令牌无法访问，导致 SQLite 报 `unable to open database file`、清理时报 `PermissionError`。统一用 `tests/tmpdir.py`（在 `build/test-tmp/` 下普通 `mkdir`，继承父目录权限，`shutil.rmtree(ignore_errors=True)` 清理）。
 
 ## 7. Win32 API 清单（win32.py）
 
