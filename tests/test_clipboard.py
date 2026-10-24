@@ -189,5 +189,18 @@ class ListenerSuppressTests(unittest.TestCase):
         self.assertEqual(self.database.count(), 1)
 
 
+class NotifyUiTests(unittest.TestCase):
+    """内容未变时不通知界面（CB-12），避免「选中文本」导致整屏闪烁。"""
+
+    def test_new_item_notifies(self):
+        self.assertTrue(clipboard.should_notify_ui({"id": 1, "created": True}))
+
+    def test_duplicate_item_does_not_notify(self):
+        self.assertFalse(clipboard.should_notify_ui({"id": 1, "created": False}))
+
+    def test_missing_event_does_not_notify(self):
+        self.assertFalse(clipboard.should_notify_ui(None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,8 @@ ICON_WIDTH = 26
 BUTTON_WIDTH = 30
 #: 正文最多显示的行数。
 TEXT_MAX_LINES = 3
+#: 省略号与行尾之间保留的像素余量，避免最后一个字被裁剪。
+ELLIPSIS_MARGIN = 2
 #: 私密卡片的打码占位。
 PRIVATE_MASK = "••••••••••••"
 
@@ -95,7 +97,8 @@ def clip_lines(text: str, font, pixel_width: int, max_lines: int = TEXT_MAX_LINE
 
     if truncated and lines:
         last = lines[-1]
-        while last and font.measure(last + "…") > width:
+        # 留 2px 余量：贴边时 Tk 会把最后一个字（尤其是省略号）裁掉。
+        while last and font.measure(last + "…") > width - ELLIPSIS_MARGIN:
             last = last[:-1]
         lines[-1] = last + "…"
     return "\n".join(lines)
@@ -178,13 +181,13 @@ class ClipCard(tk.Canvas):
         )
         self._build_content()
         self._bind_hover()
-        self.after_idle(self._relayout)
+        self._relayout_job = self.after_idle(self._relayout)
 
     # ---- 构建 -------------------------------------------------------
 
     def _text_width(self) -> int:
-        """正文可用宽度：卡片内部减去图标与按钮列。"""
-        return max(80, self._inner_width - ICON_WIDTH - 2 * BUTTON_WIDTH - 12)
+        """正文可用宽度：卡片内部减去图标与按钮列，再留一点安全余量。"""
+        return max(80, self._inner_width - ICON_WIDTH - 2 * BUTTON_WIDTH - 24)
 
     def _build_content(self) -> None:
         bg = self._bg_normal
@@ -220,7 +223,12 @@ class ClipCard(tk.Canvas):
             fg=theme.TEXT_PRIMARY,
             justify="left",
             anchor="nw",
-            wraplength=self._text_width(),
+            # 换行完全由 clip_lines() 按像素宽度算好；这里必须关掉 Tk 的自动换行，
+            # 否则它会按略小于实际宽度的值再折一次，行尾的字（和省略号）就被裁掉。
+            wraplength=0,
+            bd=0,
+            padx=0,
+            pady=0,
         )
         self._text_label.pack(side="left", fill="x", expand=True)
         self._tint_widgets.append(self._text_label)
@@ -413,6 +421,7 @@ class ClipCard(tk.Canvas):
     # ---- 布局 -------------------------------------------------------
 
     def _relayout(self) -> None:
+        self._relayout_job = None
         if not self.winfo_exists():
             return
         self.update_idletasks()
@@ -429,8 +438,19 @@ class ClipCard(tk.Canvas):
         else:
             self.itemconfigure(self._pin_bar, state="hidden")
 
+    def destroy(self) -> None:
+        """销毁前取消待执行的布局回调，避免 Tk 报 invalid command name。"""
+        job = getattr(self, "_relayout_job", None)
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except tk.TclError:
+                pass
+            self._relayout_job = None
+        super().destroy()
+
     def set_width(self, width: int) -> None:
-        """窗口变宽/变窄时更新卡片宽度与换行宽度。"""
+        """窗口变宽/变窄时更新卡片宽度与换行后的正文。"""
         width = max(MIN_CARD_WIDTH, int(width))
         if width == self._width:
             return
@@ -438,8 +458,5 @@ class ClipCard(tk.Canvas):
         self._inner_width = width - 2 * theme.PAD_CARD
         self.configure(width=width)
         self.itemconfigure(self._window, width=self._inner_width)
-        self._text_label.configure(
-            text=self._preview_text(),
-            wraplength=self._text_width(),
-        )
+        self._text_label.configure(text=self._preview_text())
         self._relayout()

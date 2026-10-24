@@ -63,6 +63,25 @@ def human_size(byte_size: int | None) -> str:
     return f"{size / (1024 * 1024):.1f} MB"
 
 
+#: 判断列表是否需要重绘时比较的字段（其余字段不影响卡片外观）。
+SNAPSHOT_FIELDS = ("id", "updated_at", "pinned", "is_private")
+
+
+def items_changed(old: list[dict], new: list[dict]) -> bool:
+    """比较两次查询结果，决定是否需要重绘列表。
+
+    只比较会影响卡片外观与顺序的字段；内容未变时返回 ``False``，
+    调用方就可以完全不动界面（这是「不闪」的关键）。
+    """
+    if len(old) != len(new):
+        return True
+    for before, after in zip(old, new):
+        for field in SNAPSHOT_FIELDS:
+            if before.get(field) != after.get(field):
+                return True
+    return False
+
+
 class MainWindow(tk.Tk):
     """主窗口：顶栏 + 滚动卡片列表 + 状态栏。"""
 
@@ -91,6 +110,8 @@ class MainWindow(tk.Tk):
         self._resize_job = None
         self._placeholder_active = True
         self._cards: list[card.ClipCard] = []
+        #: 当前已渲染数据（按列表顺序），用于判断是否需要局部重绘。
+        self._snapshot: list[dict] = []
         self._has_more = False
         self._loading_more = False
         self._thumb_cache: dict[str, ImageTk.PhotoImage] = {}
@@ -254,9 +275,18 @@ class MainWindow(tk.Tk):
     # ---- 状态栏 -------------------------------------------------------
 
     def _set_base_status(self, text: str) -> None:
-        """设置状态栏的常驻文本（条数、保留天数）。"""
+        """设置状态栏的常驻文本（条数、保留天数）；文本未变时不动控件。"""
+        if text == self._base_status:
+            return
         self._base_status = text
         self._render_status()
+
+    def _dialog_exists(self, dialog) -> bool:
+        """对话框是否仍然存在（被用户关掉后引用可能已失效）。"""
+        try:
+            return bool(dialog.winfo_exists())
+        except tk.TclError:
+            return False
 
     def _flash_status(self, text: str, timeout_ms: int = STATUS_FLASH_MS) -> None:
         """临时提示（复制失败、热键回退等），到时自动恢复常驻文本。"""
@@ -353,22 +383,30 @@ class MainWindow(tk.Tk):
         # 等这一帧滚动生效后再判断是否到底，避免用上一帧的 yview。
         self.after(120, self._maybe_load_more)
 
-    def refresh(self) -> None:
-        """按当前关键字重新查询并重绘列表（第一页）。"""
+    def refresh(self, *, force: bool = False) -> None:
+        """按当前关键字重新查询并同步列表。
+
+        ``force=True`` 时无视差异强制重绘（解锁/上锁、批量清理等场景）。
+        已加载分页时按已加载条数查询，避免刷新把第二页丢掉。
+        """
         if self._closing:
             return
         keyword = self._keyword or None
+        limit = max(theme.LIST_PAGE, len(self._cards))
         if keyword:
-            items = self._database.search(keyword, limit=theme.LIST_PAGE)
+            items = self._database.search(keyword, limit=limit)
         else:
-            items = self._database.list_items(limit=theme.LIST_PAGE)
-        self._render(items)
-        self._has_more = len(items) >= theme.LIST_PAGE
+            items = self._database.list_items(limit=limit)
         total = self._database.count(keyword)
         status = f"共 {total} 条 · 保留 {self._retention_days()} 天"
         if self._security is not None and self._security.unlocked:
             status += " · 私密已解锁"
         self._set_base_status(status)
+        if force or items_changed(self._snapshot, items):
+            self._render(items)
+            self._has_more = len(items) >= limit
+        else:
+            self._has_more = len(items) >= limit
 
     def _retention_days(self) -> int:
         if self._config is None:
@@ -420,34 +458,92 @@ class MainWindow(tk.Tk):
         self.refresh()
 
     def _render(self, items: list[dict]) -> None:
-        for child in self.list_frame.winfo_children():
-            child.destroy()
-        self._cards = []
+        """按数据差异局部更新列表：没变化的卡片原样复用，不整屏重建。"""
         if not items:
+            self._clear_cards()
             self._render_empty()
-        else:
-            self._append_items(items)
+            self._snapshot = []
+            self._has_more = False
+            self._on_content_configure()
+            return
+        # 清掉空状态占位等非卡片控件
+        for child in self.list_frame.winfo_children():
+            if not isinstance(child, card.ClipCard):
+                child.destroy()
+        existing = {clip.item.get("id"): clip for clip in self._cards}
+        new_cards: list[card.ClipCard] = []
+        for item in items:
+            item_id = item.get("id")
+            old = existing.pop(item_id, None)
+            if old is not None and self._card_matches(old, item):
+                new_cards.append(old)
+                continue
+            if old is not None:
+                old.destroy()
+            new_cards.append(self._make_card(item))
+        for stale in existing.values():
+            stale.destroy()
+        self._cards = new_cards
+        self._reorder_cards()
+        self._snapshot = [dict(entry) for entry in items]
         self._on_content_configure()
 
-    def _append_items(self, items: list[dict]) -> None:
-        width = self._current_content_width()
+    def _make_card(self, item: dict) -> card.ClipCard:
+        """创建并摆放一张卡片（不登记到 ``_cards``，由调用方决定位置）。"""
+        clip = card.ClipCard(
+            self.list_frame,
+            item,
+            fonts=self._fonts,
+            thumb_loader=self._load_thumbnail,
+            width=self._current_content_width(),
+            on_copy=self._copy_item,
+            on_pin=self._toggle_pin,
+            on_delete=self._delete_item,
+            on_unlock=self._unlock_item,
+            on_view=self._view_item,
+            unlocked=bool(self._security is not None and self._security.unlocked),
+        )
+        clip.pack(fill="x", pady=(0, theme.GAP_CARD))
+        return clip
+
+    def _card_matches(self, clip: card.ClipCard, item: dict) -> bool:
+        """卡片数据与最新查询结果是否一致（不一致就重建这一张）。"""
+        old = getattr(clip, "item", None) or {}
+        if old.get("id") != item.get("id"):
+            return False
+        for field in SNAPSHOT_FIELDS:
+            if old.get(field) != item.get(field):
+                return False
         unlocked = bool(self._security is not None and self._security.unlocked)
-        for item in items:
-            clip = card.ClipCard(
-                self.list_frame,
-                item,
-                fonts=self._fonts,
-                thumb_loader=self._load_thumbnail,
-                width=width,
-                on_copy=self._copy_item,
-                on_pin=self._toggle_pin,
-                on_delete=self._delete_item,
-                on_unlock=self._unlock_item,
-                on_view=self._view_item,
-                unlocked=unlocked,
-            )
+        return bool(getattr(clip, "_unlocked", False)) == unlocked
+
+    def _reorder_cards(self) -> None:
+        """顺序变化时才重排（只 pack_forget 再 pack，不销毁重建）。"""
+        try:
+            current = [w for w in self.list_frame.pack_slaves() if isinstance(w, card.ClipCard)]
+        except tk.TclError:
+            return
+        if current == self._cards:
+            return
+        for clip in self._cards:
+            clip.pack_forget()
+        for clip in self._cards:
             clip.pack(fill="x", pady=(0, theme.GAP_CARD))
+
+    def _clear_cards(self) -> None:
+        for clip in self._cards:
+            try:
+                clip.destroy()
+            except tk.TclError:
+                pass
+        self._cards = []
+
+    def _append_items(self, items: list[dict]) -> None:
+        """追加下一页卡片（滚动分页用）。"""
+        for item in items:
+            clip = self._make_card(item)
             self._cards.append(clip)
+            self._snapshot.append(dict(item))
 
     def _render_empty(self) -> None:
         holder = tk.Frame(self.list_frame, bg=theme.BG_ROOT, pady=70)
@@ -586,6 +682,10 @@ class MainWindow(tk.Tk):
 
     def _prompt_set_password(self, item: dict) -> None:
         """首次使用私密内容时设置密码，成功后立即解锁并复制该条。"""
+        self._open_set_password(on_success=lambda: self._copy_item(item))
+
+    def _open_set_password(self, on_success=None) -> None:
+        """设置二级密码（设置面板与私密卡首次点击共用一条入口）。"""
         guard = self._security
         if guard is None or self._password_dialog_open():
             return
@@ -596,9 +696,13 @@ class MainWindow(tk.Tk):
             except ValueError as exc:
                 return str(exc)
             guard.verify(password)
-            self.refresh()
+            self.refresh(force=True)
             self._flash_status("二级密码已设置，私密内容已解锁，5 分钟内有效")
-            self._copy_item(item)
+            dialog = self._settings_dialog
+            if dialog is not None and self._dialog_exists(dialog):
+                dialog.mark_password_set()
+            if on_success is not None:
+                on_success()
             return None
 
         self._open_password_dialog(
@@ -827,6 +931,7 @@ class MainWindow(tk.Tk):
             on_clear=self._clear_history,
             on_saved=self.refresh,
             on_reset_password=self._reset_password,
+            on_set_password=self._open_set_password,
             password_set=bool(self._security is not None and self._security.is_password_set()),
             hotkey_label=self._hotkey_label,
         )

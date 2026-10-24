@@ -111,6 +111,34 @@ class ClipLinesTests(unittest.TestCase):
         result = card.clip_lines(text, self.font, 500)
         self.assertLessEqual(len(result.split("\n")), card.TEXT_MAX_LINES)
 
+    def test_every_line_fits_pixel_width(self) -> None:
+        """0.3.0 回归：每一行（含省略号）都必须放得进给定宽度。"""
+        text = "核心特点：体积小、生成或解析" * 20
+        width = 200
+        result = card.clip_lines(text, self.font, width)
+        for line in result.split("\n"):
+            self.assertLessEqual(self.font.measure(line), width)
+
+    def test_ellipsis_not_cut_at_boundary(self) -> None:
+        """省略号要留出余量，避免贴边被裁掉。"""
+        text = "很长的一段中文内容" * 30
+        width = 120
+        result = card.clip_lines(text, self.font, width)
+        last = result.split("\n")[-1]
+        self.assertTrue(last.endswith("…"))
+        self.assertLessEqual(self.font.measure(last), width - card.ELLIPSIS_MARGIN)
+
+    def test_narrow_width_still_three_lines(self) -> None:
+        text = "很长的一段中文内容" * 30
+        result = card.clip_lines(text, self.font, 80)
+        lines = result.split("\n")
+        self.assertGreaterEqual(len(lines), 1)
+        self.assertLessEqual(len(lines), card.TEXT_MAX_LINES)
+        self.assertTrue(lines[-1].endswith("…"))
+
+    def test_original_ellipsis_kept(self) -> None:
+        self.assertEqual(card.clip_lines("已有省略…", self.font, 500), "已有省略…")
+
 
 if __name__ == "__main__":
     unittest.main()

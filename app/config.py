@@ -18,7 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover - 仅类型检查期使用
     import db as db_module
 
 #: 程序版本号（设置面板展示；打包发布前在 docs/07 同步更新）。
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 # 保留期默认值与允许范围（见 docs/01 FR-10）
 DEFAULT_RETENTION_DAYS = 3

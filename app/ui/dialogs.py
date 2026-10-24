@@ -42,6 +42,7 @@ class SettingsDialog(tk.Toplevel):
         on_clear: Callable[[], int] | None = None,
         on_saved: Callable[[], None] | None = None,
         on_reset_password: Callable[[], int] | None = None,
+        on_set_password: Callable[[], None] | None = None,
         password_set: bool = False,
         hotkey_label: str = "Ctrl+Shift+V",
     ) -> None:
@@ -52,6 +53,7 @@ class SettingsDialog(tk.Toplevel):
         self._on_clear = on_clear
         self._on_saved = on_saved
         self._on_reset_password = on_reset_password
+        self._on_set_password = on_set_password
         self._password_set = bool(password_set)
         self._hotkey_label = hotkey_label or "Ctrl+Shift+V"
 
@@ -237,28 +239,24 @@ class SettingsDialog(tk.Toplevel):
             width=8,
             anchor="w",
         ).pack(side="left")
-        tk.Label(
+        self._password_state_label = tk.Label(
             password_row,
-            text="已设置" if self._password_set else "未设置",
             font=self._fonts.body_bold(),
             bg=theme.BG_ROOT,
-            fg=theme.TEXT_PRIMARY if self._password_set else theme.TEXT_SECONDARY,
             anchor="w",
-        ).pack(side="left")
-        self._reset_button = self._action_button(
+        )
+        self._password_state_label.pack(side="left")
+        self._password_button = self._action_button(
             password_row,
-            "重置密码",
-            self._reset_password,
+            "重置密码" if self._password_set else "设置密码",
+            self._password_action,
             bg=theme.BG_CARD,
-            fg=theme.DANGER if self._password_set else theme.TEXT_SECONDARY,
+            fg=theme.DANGER if self._password_set else theme.PRIMARY,
             hover=theme.PRIMARY_LIGHT,
             border=True,
         )
-        self._reset_button.configure(
-            state="normal" if self._password_set else "disabled",
-            cursor="hand2" if self._password_set else "",
-        )
-        self._reset_button.pack(side="right")
+        self._password_button.pack(side="right")
+        self._sync_password_row()
 
         # 清空历史
         self._action_button(
@@ -420,6 +418,42 @@ class SettingsDialog(tk.Toplevel):
             return
         messagebox.showinfo("已清空", f"已删除 {count} 条记录。", parent=self)
 
+    def _password_action(self) -> None:
+        """未设置时进入设置流程，已设置时进入重置流程。"""
+        if self._password_set:
+            self._reset_password()
+        else:
+            self._request_set_password()
+
+    def _request_set_password(self) -> None:
+        if self._on_set_password is None:
+            messagebox.showwarning("暂不可用", "当前无法打开密码设置。", parent=self)
+            return
+        self._on_set_password()
+
+    def _sync_password_row(self) -> None:
+        """按 ``_password_set`` 刷新状态文字与按钮外观。"""
+        self._password_state_label.configure(
+            text="已设置" if self._password_set else "未设置",
+            fg=theme.TEXT_PRIMARY if self._password_set else theme.TEXT_SECONDARY,
+        )
+        self._password_button.configure(
+            text="重置密码" if self._password_set else "设置密码",
+            fg=theme.DANGER if self._password_set else theme.PRIMARY,
+            state="normal",
+            cursor="hand2",
+        )
+
+    def mark_password_set(self) -> None:
+        """密码在本面板打开期间被设置成功：当场切换为「已设置」。"""
+        self._password_set = True
+        self._sync_password_row()
+
+    def mark_password_unset(self) -> None:
+        """密码被清除后：切换为「未设置 / 设置密码」。"""
+        self._password_set = False
+        self._sync_password_row()
+
     def _reset_password(self) -> None:
         if self._on_reset_password is None:
             return
@@ -436,8 +470,7 @@ class SettingsDialog(tk.Toplevel):
             _LOGGER.exception("重置密码失败")
             messagebox.showerror("重置失败", f"重置密码时出错：\n{exc}", parent=self)
             return
-        self._password_set = False
-        self._reset_button.configure(state="disabled", fg=theme.TEXT_SECONDARY, cursor="")
+        self.mark_password_unset()
         messagebox.showinfo(
             "已重置",
             f"二级密码已清除，同时删除了 {count} 条私密记录。",

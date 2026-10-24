@@ -152,6 +152,15 @@ def capture(
     return {"kind": "image", "id": item_id, "created": created, "private": private}
 
 
+def should_notify_ui(event: dict | None) -> bool:
+    """这条记录是否需要让界面重绘。
+
+    只有内容确实新增（``created``）才通知；重复内容只刷新时间戳，
+    避免某些程序「选中文本」时写剪贴板导致列表整屏闪烁。
+    """
+    return bool(event and event.get("created"))
+
+
 class ClipboardListener(threading.Thread):
     """后台监听线程：序号变化 → 记录 → 向队列投递事件。"""
 
@@ -227,6 +236,11 @@ class ClipboardListener(threading.Thread):
                     _LOGGER.exception("记录剪贴板内容失败")
                     continue
                 if event is not None and self._queue is not None:
-                    self._queue.put(("new", event))
+                    if should_notify_ui(event):
+                        self._queue.put(("new", event))
+                    else:
+                        _LOGGER.debug(
+                            "剪贴板内容未变化，仅更新时间戳，id=%s", event.get("id")
+                        )
         finally:
             _LOGGER.info("剪贴板监听已停止")

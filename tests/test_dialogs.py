@@ -118,6 +118,37 @@ class SettingsDialogTests(unittest.TestCase):
         dialog = self._make(hotkey_label="Ctrl+Alt+V")
         self.assertEqual(dialog._hotkey_text(), "Ctrl+Alt+V")
 
+    def test_password_row_unset_offers_set_button(self) -> None:
+        """0.3.0：未设置密码时按钮必须是「设置密码」且可点。"""
+        dialog = self._make(password_set=False)
+        self.assertEqual(dialog._password_state_label.cget("text"), "未设置")
+        self.assertEqual(dialog._password_button.cget("text"), "设置密码")
+        self.assertEqual(str(dialog._password_button.cget("state")), "normal")
+
+    def test_password_row_set_offers_reset_button(self) -> None:
+        dialog = self._make(password_set=True)
+        self.assertEqual(dialog._password_state_label.cget("text"), "已设置")
+        self.assertEqual(dialog._password_button.cget("text"), "重置密码")
+        self.assertEqual(str(dialog._password_button.cget("state")), "normal")
+
+    def test_set_password_action_calls_callback(self) -> None:
+        calls: list[int] = []
+        dialog = self._make(password_set=False, on_set_password=lambda: calls.append(1))
+        dialog._password_action()
+        self.assertEqual(calls, [1])
+
+    def test_mark_password_set_updates_row(self) -> None:
+        dialog = self._make(password_set=False)
+        dialog.mark_password_set()
+        self.assertEqual(dialog._password_state_label.cget("text"), "已设置")
+        self.assertEqual(dialog._password_button.cget("text"), "重置密码")
+
+    def test_mark_password_unset_restores_set_button(self) -> None:
+        dialog = self._make(password_set=True)
+        dialog.mark_password_unset()
+        self.assertEqual(dialog._password_state_label.cget("text"), "未设置")
+        self.assertEqual(dialog._password_button.cget("text"), "设置密码")
+
 
 def _fonts_stub():
     """返回最小可用的字体工厂，避免真正查询系统字体。"""

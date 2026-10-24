@@ -110,6 +110,7 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | CB-09 | 未请求抑制时消费 | 返回 False |
 | CB-10 | 抑制标记过期（`seconds=0`） | 立即失效，返回 False |
 | CB-11 | 抑制过期后的真实复制 | 仍正常记录，不被吞掉 |
+| CB-12 | `NotifyUiTests`（3 例） | 只有 `created=True` 才通知界面；重复内容与空事件都不通知 |
 
 > 真实剪贴板的读写不走单元测试（依赖桌面会话），用 `tools/clipboard_watch.py` 手动验证。
 
@@ -127,6 +128,10 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | UI-08 | `test_hard_line_break_respected` | 文本内的硬换行保留 |
 | UI-09 | `test_long_line_is_wrapped_and_truncated` | 长行按像素宽度断行、末行加省略号 |
 | UI-10 | `test_line_count_limited` | 超过 3 行只保留 3 行 |
+| UI-11 | `test_every_line_fits_pixel_width` | 每行像素宽度都不超过可用宽度（0.3.0 裁字修复） |
+| UI-12 | `test_ellipsis_not_cut_at_boundary` | 末尾省略号在边界处仍完整可见 |
+| UI-13 | `test_narrow_width_still_three_lines` | 极窄宽度下不崩、仍最多 3 行 |
+| UI-14 | `test_original_ellipsis_kept` | 原文自带省略号不被误删 |
 
 > `ClipLinesTests` 需要 Tk 显示；在无桌面环境自动 `SkipTest`。
 
@@ -155,6 +160,25 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | DL-06 | `test_clear_history_calls_callback_and_reports_count` | 确认后调用清空回调并提示删除条数 |
 | DL-07 | `test_clear_history_cancelled_does_nothing` | 取消时不调用回调 |
 | DL-08 | `test_hotkey_label_is_shown` | 面板展示传入的当前热键 |
+| DL-09 | `test_password_row_unset_offers_set_button` | 未设置时显示「未设置」+「设置密码」且按钮可点 |
+| DL-10 | `test_password_row_set_offers_reset_button` | 已设置时显示「已设置」+「重置密码」 |
+| DL-11 | `test_set_password_action_calls_callback` | 点「设置密码」调用 `on_set_password` 回调 |
+| DL-12 | `test_mark_password_set_updates_row` | 设置成功后状态文字与按钮当场切换 |
+| DL-13 | `test_mark_password_unset_restores_set_button` | 重置密码后恢复为「设置密码」 |
+
+### 2.8 `tests/test_list_diff.py`（0.3.0 新增）
+
+| 编号 | 用例 | 覆盖点 |
+|---|---|---|
+| LD-01 | `test_both_empty` | 两个空列表视为未变化 |
+| LD-02 | `test_identical_lists` | 内容与顺序都相同 → 不重绘 |
+| LD-03 | `test_item_added` | 新增一条 → 需要重绘 |
+| LD-04 | `test_item_removed` | 删除一条 → 需要重绘 |
+| LD-05 | `test_order_changed` | 顺序变化（置顶）→ 需要重绘 |
+| LD-06 | `test_updated_at_changed` | 时间戳变化 → 需要重绘 |
+| LD-07 | `test_pinned_changed` | 置顶状态变化 → 需要重绘 |
+| LD-08 | `test_private_changed` | 私密标记变化 → 需要重绘 |
+| LD-09 | `test_unrelated_field_ignored` | 无关字段变化不触发重绘 |
 
 > 需要 Tk 显示；无桌面环境整组 `SkipTest`。
 
@@ -185,14 +209,17 @@ M1 实际覆盖补充：sha256 文本/字节一致性、文本与图片大小上
 | A19 | 点击卡片复制后查看列表 | 不多出重复卡片，旧卡片不会被顶到最前（0.2.0 不回灌） |
 | A20 | 复制一段超过 3 行的长文本 | 卡片显示「查看全文 ›」；点开可滚动看全文；「复制全文」可粘贴 |
 | A21 | 普通用户（非管理员）双击文件夹版 exe | 正常启动出窗口，无「Could not create temporary directory!」 |
+| A22 | 设置面板里点「未设置」旁的「设置密码」 | 打开设置密码对话框；设置完成后状态文字与按钮当场变为「已设置 / 重置密码」 |
+| A23 | 在浏览器里用鼠标选中一段文字（不按复制） | 列表**不闪烁**、不新增卡片（0.3.0 增量更新） |
+| A24 | 长文本卡片查看 | 3 行预览每行完整、末行带「…」，不出现被裁的字 |
 
-### 截至 0.2.0 的验收进度（2026-10-21）
+### 截至 0.3.0 的验收进度（2026-10-24）
 
-- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（`build/v02_probe.py`：点击文字卡片写回剪贴板，窗口 `winfo_viewable()` 保持 True，状态栏提示已复制）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A12**（首个实例隐藏窗口后再次启动，第二个进程 exit 0 并唤回首个窗口）、**A13**（`build/purge_probe.py`：过期非置顶记录与图片文件被删、置顶过期保留、`last_purge_at` 写入）、**A14 / A15**（`build/security_probe.py`：私密卡打码 → 首次点击设置密码 → 解锁后显示明文与缩略图 → 错误密码提示剩余次数 → 连续失败进入冷却）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）、**A19 部分**（`build/v02_probe.py` 验证 `suppress_once()` 写入 1 次且不产生回灌；CB-08…CB-11 单测覆盖抑制窗口）、**A20**（长文本卡出现「查看全文 ›」，弹窗 620×480 可滚动查看全文，底部字数与「复制全文」可用；`VIEW-01…07` 单测覆盖显示条件）。
-- 设置面板（A12/A13 的配套）由 `build/settings_probe.py` 验证：预设与自定义保留期写入、非法值拦截、清空历史连带删图片；M6 新增 `build/m6_settings_probe.py` 验证「重置密码」：密码清除、私密记录与图片文件一并删除、按钮转禁用。
-- 打包（0.2.0）已通过：`dist/PasteBoard/PasteBoard.exe`（5.1 MB，文件夹共 74.2 MB）从 `Start-Process` 启动，0.9 秒内完成初始化并创建 `dist/PasteBoard/data/`；跨进程复制被记录；`WM_CLOSE` 后首次隐藏提示弹出，确认后窗口隐藏且进程存活；exe 属性 `FileVersion 0.2.0`、`ProductName 历史粘贴板`。
-- 待实机验证：**A6**（点击图片卡片写回剪贴板，需要真实粘贴到画图确认）、**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A16**（点「彻底退出」按钮）、**A17**（重启后数据保留；`security_probe` 已用重建 `Config/Security` 间接验证密码持久化）、**A19 实进程部分**（真实双击复制后确认列表不多出新卡片）、**A21**（普通用户非管理员双击文件夹版 exe，需用户在真实桌面确认），以及 `docs/07` 的 R2–R6、R8。
-- 开发期自检脚本（均不入库）：`build/ui_probe.py`（窗口渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）、`build/security_probe.py`（二级密码全流程）、`build/m6_settings_probe.py`（设置面板里的重置密码）、`build/v02_probe.py`（查看全文、复制不回灌与窗口保留）。
+- 已通过：**A1 / A2 / A3**（真实进程 `Set-Clipboard` 验证，重复内容只刷新时间）、**A4**（图片卡缩略图与尺寸渲染）、**A5**（`build/v02_probe.py`：点击文字卡片写回剪贴板，窗口 `winfo_viewable()` 保持 True，状态栏提示已复制）、**A7**（置顶后目标卡排到首位、卡片显示主色条与「已置顶」）、**A8**（删除确认后库与卡片同步减少、图片文件交给 `storage.delete_files`）、**A9**（搜索「SELECT」过滤、无结果空状态、清空恢复）、**A10**（`WM_CLOSE` 后窗口隐藏、进程存活、记录继续）、**A12**（首个实例隐藏窗口后再次启动，第二个进程 exit 0 并唤回首个窗口）、**A13**（`build/purge_probe.py`：过期非置顶记录与图片文件被删、置顶过期保留、`last_purge_at` 写入）、**A14 / A15**（`build/security_probe.py`：私密卡打码 → 首次点击设置密码 → 解锁后显示明文与缩略图 → 错误密码提示剩余次数 → 连续失败进入冷却）、**A18 部分**（150% 缩放屏幕下界面清晰、布局不溢出）、**A19 部分**（`build/v02_probe.py` 验证 `suppress_once()` 写入 1 次且不产生回灌；CB-08…CB-11 单测覆盖抑制窗口）、**A20**（长文本卡出现「查看全文 ›」，弹窗 620×480 可滚动查看全文，底部字数与「复制全文」可用；`VIEW-01…07` 单测覆盖显示条件）、**A22**（`build/v03_probe.py`：未设置显示「设置密码」、`mark_password_set()` 后变「已设置 / 重置密码」）、**A23 部分**（`build/v03_probe.py` 复用 30 张卡仅新建 1 张；`LD-01…09` 单测覆盖快照比对）、**A24**（`build/v03_probe.py`：长文本 3 行、每行像素宽度 `[689, 689, 687]` ≤ 700、末行带省略号；`UI-11…UI-14` 单测覆盖）。
+- 设置面板（A12/A13 的配套）由 `build/settings_probe.py` 验证：预设与自定义保留期写入、非法值拦截、清空历史连带删图片；`build/m6_settings_probe.py` 验证「重置密码」。
+- 打包（0.3.0）已通过：`dist/PasteBoard/PasteBoard.exe`（5.1 MB，文件夹共 74.2 MB）从 `Start-Process` 启动，窗口标题「历史粘贴板」、三条初始化日志正常、创建 `dist/PasteBoard/data/history.db`；exe 属性 `FileVersion 0.3.0`、`ProductName 历史粘贴板`。
+- 待实机验证：**A6**（点击图片卡片写回剪贴板，需要真实粘贴到画图确认）、**A11**（`Ctrl+Shift+V` 唤回；沙箱内无法注入按键，热键注册成功日志已确认）、**A16**（点「彻底退出」按钮）、**A17**（重启后数据保留）、**A19 实进程部分**、**A21**（普通用户非管理员双击文件夹版 exe）、**A23 真实桌面部分**（在浏览器中选中文字观察列表是否静止）。
+- 开发期自检脚本（均不入库）：`build/ui_probe.py`、`build/purge_probe.py`、`build/settings_probe.py`、`build/security_probe.py`、`build/m6_settings_probe.py`、`build/v02_probe.py`、`build/v03_probe.py`（设置入口、增量渲染、长文本预览）。
 
 ## 4. 回归清单（每次改代码必过）
 

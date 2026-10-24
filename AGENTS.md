@@ -120,9 +120,9 @@ python make_version_info.py --check
 
 ## 9. 当前状态
 
-- 阶段：**0.2.0 已完成**（M0–M7 交付 + 用户实测反馈修复），当前 **125 个单元测试全绿**，产物为文件夹绿色版 `dist/PasteBoard/PasteBoard.exe`（5.1 MB，文件夹共 74.2 MB）。
-- 已能：后台记录文字与图片、圆角卡片列表、搜索过滤、点击卡片复制回剪贴板（**窗口保持打开**，自身写入不回灌历史）、置顶/取消置顶、删除（连带图片文件）、**查看全文弹窗**、悬停态、分页加载、关闭隐藏、`Ctrl+Shift+V` 唤回（被占用时自动回退 `Ctrl+Alt+V` / `Ctrl+Shift+H`）、单实例（重复启动唤出已有窗口）、保留期自动清理（启动一次 + 每 10 分钟，连带删图片文件）、设置面板（保留期 1/3/5/7+自定义、清空历史、数据目录、版本、重置密码）、彻底退出清理、**二级密码**（私密卡打码、首次点击设置密码、解锁后本会话可见可复制、错误 5 次冷却 30 秒、空闲 5 分钟或窗口隐藏自动上锁）、PyInstaller **onedir** 打包（`-Onefile` 仍可选）与 exe 版本资源。
+- 阶段：**0.3.0 已完成**（M0–M7 交付 + 两轮用户实测反馈修复），当前 **146 个单元测试全绿**，产物为文件夹绿色版 `dist/PasteBoard/PasteBoard.exe`（5.1 MB，文件夹共 74.2 MB）。
+- 已能：后台记录文字与图片、圆角卡片列表（**增量更新，不整屏重建**）、搜索过滤、点击卡片复制回剪贴板（**窗口保持打开**，自身写入不回灌历史）、置顶/取消置顶、删除（连带图片文件）、**查看全文弹窗**、**长文本 3 行预览不裁字**、悬停态、分页加载、关闭隐藏、`Ctrl+Shift+V` 唤回（被占用时自动回退 `Ctrl+Alt+V` / `Ctrl+Shift+H`）、单实例（重复启动唤出已有窗口）、保留期自动清理（启动一次 + 每 10 分钟，连带删图片文件）、设置面板（保留期 1/3/5/7+自定义、清空历史、数据目录、版本、**未设置时可直接设置二级密码**、已设置时可重置密码）、彻底退出清理、**二级密码**（私密卡打码、解锁后本会话可见可复制、错误 5 次冷却 30 秒、空闲 5 分钟或窗口隐藏自动上锁）、PyInstaller **onedir** 打包（`-Onefile` 仍可选）与 exe 版本资源。
 - 版本号规则：`app/config.py` 的 `APP_VERSION` 是唯一来源；发版时同步更新 `CHANGELOG.md`，打包前运行 `python make_version_info.py`。
-- 下一步：实机复验 `docs/06-test-plan.md` 的 A6/A11/A16/A17/A19（实进程部分）/A21 与 `docs/07` 的 R2–R6、R8；之后的打磨项（搜索框圆角、toast、`libpng` 噪声）见 `docs/05-roadmap.md` 的已知限制。
+- 下一步：实机复验 `docs/06-test-plan.md` 的 A6/A11/A16/A17/A19（实进程部分）/A21/A23（真实桌面部分）与 `docs/07` 的 R2–R6、R8；之后的打磨项（搜索框圆角、toast、`libpng` 噪声）见 `docs/05-roadmap.md` 的已知限制。
 - 已有代码：`app/config.py`、`app/db.py`、`app/storage.py`、`app/win32.py`、`app/clipboard.py`、`app/security.py`、`app/main.py`、`app/ui/{__init__,theme,card,main_window,dialogs}.py`；工具 `tools/devlog.py`、`tools/dev_smoke.py`、`tools/clipboard_watch.py`、`make_icon.py`、`make_version_info.py`、`build_exe.ps1`。
-- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py`（渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）、`build/security_probe.py`（二级密码全流程）、`build/m6_settings_probe.py`（设置面板重置密码）、`build/v02_probe.py`（查看全文、复制不回灌）。
+- 开发期自检脚本放在 `build/`（不入库）：`build/ui_probe.py`（渲染/搜索/置顶/复制/删除/截图）、`build/purge_probe.py`（保留期清理）、`build/settings_probe.py`（设置面板）、`build/security_probe.py`（二级密码全流程）、`build/m6_settings_probe.py`（设置面板重置密码）、`build/v02_probe.py`（查看全文、复制不回灌）、`build/v03_probe.py`（设置入口、增量渲染、长文本预览）。
