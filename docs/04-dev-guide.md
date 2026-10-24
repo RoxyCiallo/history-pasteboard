@@ -9,7 +9,7 @@
 | 项 | 值 |
 |---|---|
 | Python | 3.12.14（本机运行时） |
-| 解释器路径 | `C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe` |
+| 解释器 | `python`（Python 3.10+，需带 tkinter 与 Pillow） |
 | 无控制台解释器 | 同目录 `pythonw.exe` |
 | GUI 库 | tkinter 8.6（标准库） |
 | 图像 | Pillow 12.3.0 |

@@ -14,7 +14,7 @@
 安装打包工具（只装到本机已用 Python 中）：
 
 ```powershell
-$py = 'C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe'
+$py = 'python'   # 换成你自己的解释器完整路径也可以
 & $py -m pip install --upgrade pyinstaller
 ```
 
@@ -133,7 +133,7 @@ R4 的唤回、R5–R7 的交互需在真实桌面手动确认。
    生成 `dist/PasteBoard.exe`（约 30.5 MB）。仅在目标机器 `%TEMP%` 可写时可用。
 2. **脚本启动**：新建 `启动.vbs`：
    ```vbs
-   CreateObject("WScript.Shell").Run """C:\path\to\pythonw.exe"" ""C:\path\to\app\main.py""", 0, False
+   CreateObject("WScript.Shell").Run """<Python 目录>\pythonw.exe"" ""<项目目录>\app\main.py""", 0, False
    ```
    交付「文件夹 + 快捷方式」，功能一致，但依赖本机 Python。
 

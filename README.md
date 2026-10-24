@@ -36,11 +36,13 @@
 
 ```powershell
 # 带控制台（便于看日志）
-& 'C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe' app/main.py
+python app/main.py
 
 # 无控制台
-& 'C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\pythonw.exe' app/main.py
+pythonw app/main.py
 ```
+
+> 需要 Python 3.10+，并带 tkinter 与 Pillow；若 `python` 不在 PATH，请换成你自己的解释器完整路径。
 
 **打包**
 

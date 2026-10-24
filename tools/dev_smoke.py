@@ -37,7 +37,7 @@ SAMPLE_TEXTS = [
     "身份证号占位 110101199001011234",
     "临时密码示例 P@ssw0rd（模拟私密内容）",
     "复制这句话，然后在主界面搜索“数据层”应该能找到",
-    "路径：E:\\deepseek_harness\\项目\\粘贴板",
+    f"路径：{storage.app_dir()}",
     "聊天记录：明天记得把合同发我",
     "命令：python -m unittest discover -s tests -v",
     "重复内容测试：重复内容测试",

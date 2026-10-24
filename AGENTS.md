@@ -75,10 +75,10 @@ python -m unittest discover -s tests -v
 
 ```powershell
 # 开发运行（带控制台，便于看日志）
-& 'C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe' app/main.py
+python app/main.py
 
 # 静默运行（无控制台）
-& '...\python\pythonw.exe' app/main.py
+pythonw app/main.py
 
 # 单元测试
 python -m unittest discover -s tests -v
@@ -100,7 +100,7 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Onefile
 # 发版：改 APP_VERSION → 更新 CHANGELOG.md → 生成版本资源 → 打包
 python make_version_info.py --check
 ```
-> 说明：`python` 指本机 Python；若未进 PATH，用第 6 节第一条的绝对路径。
+> 说明：`python` 指本机 Python（3.10+，需带 tkinter 与 Pillow）；若未进 PATH，请换成自己的解释器完整路径。
 
 ## 7. 开发日志规则
 

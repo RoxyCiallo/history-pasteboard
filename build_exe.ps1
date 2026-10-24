@@ -25,13 +25,18 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
 # ---- 1. 找 Python ---------------------------------------------------
-$Py = 'C:\Users\lenovo\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe'
-if (-not (Test-Path $Py)) {
-    $Py = (Get-Command python -ErrorAction SilentlyContinue).Source
-    if (-not $Py) {
-        Write-Error '找不到 Python，请先安装或修改本脚本里的 $Py 路径。'
-        exit 1
+# 顺序：环境变量 PASTEBOARD_PYTHON → PATH 里的 python（须带 tkinter 与 Pillow）
+$Py = $env:PASTEBOARD_PYTHON
+if (-not $Py) {
+    $candidate = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($candidate) {
+        & $candidate -c "import tkinter, PIL" 2>$null
+        if ($LASTEXITCODE -eq 0) { $Py = $candidate }
     }
+}
+if (-not $Py) {
+    Write-Error '找不到可用的 Python。请安装 Python 3.10+（需含 tkinter 与 Pillow）并加入 PATH，或用环境变量 PASTEBOARD_PYTHON 指定解释器完整路径。'
+    exit 1
 }
 Write-Host "[1/6] Python: $Py"
 
